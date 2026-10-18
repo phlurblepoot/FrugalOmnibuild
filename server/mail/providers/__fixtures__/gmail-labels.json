@@ -1,0 +1,120 @@
+{
+  "labels": [
+    {
+      "id": "CHAT",
+      "name": "CHAT",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "SENT",
+      "name": "SENT",
+      "type": "system"
+    },
+    {
+      "id": "INBOX",
+      "name": "INBOX",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelShow",
+      "type": "system",
+      "messagesTotal": 4210,
+      "messagesUnread": 7,
+      "threadsTotal": 3980,
+      "threadsUnread": 6
+    },
+    {
+      "id": "IMPORTANT",
+      "name": "IMPORTANT",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "TRASH",
+      "name": "TRASH",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "DRAFT",
+      "name": "DRAFT",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "SPAM",
+      "name": "SPAM",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "CATEGORY_FORUMS",
+      "name": "CATEGORY_FORUMS",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "CATEGORY_UPDATES",
+      "name": "CATEGORY_UPDATES",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "CATEGORY_PERSONAL",
+      "name": "CATEGORY_PERSONAL",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "CATEGORY_PROMOTIONS",
+      "name": "CATEGORY_PROMOTIONS",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "CATEGORY_SOCIAL",
+      "name": "CATEGORY_SOCIAL",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "STARRED",
+      "name": "STARRED",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "UNREAD",
+      "name": "UNREAD",
+      "messageListVisibility": "hide",
+      "labelListVisibility": "labelHide",
+      "type": "system"
+    },
+    {
+      "id": "Label_12",
+      "name": "Bids",
+      "messageListVisibility": "show",
+      "labelListVisibility": "labelShow",
+      "type": "user",
+      "messagesTotal": 61,
+      "messagesUnread": 2
+    },
+    {
+      "id": "Label_31",
+      "name": "Clients/Tidewater",
+      "messageListVisibility": "show",
+      "labelListVisibility": "labelShow",
+      "type": "user"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('me')/mailFolders('sentitems')/messages",
+  "value": [
+    {
+      "id": "SENT-1",
+      "internetMessageId": "<AS8PR01MB9999.EURPRD01.PROD.OUTLOOK.COM>",
+      "conversationId": "t9",
+      "subject": "s",
+      "sentDateTime": "2026-08-29T12:00:00Z",
+      "internetMessageHeaders": [{ "name": "x-frugal-message-id", "value": "mid@x" }]
+    }
+  ]
+}

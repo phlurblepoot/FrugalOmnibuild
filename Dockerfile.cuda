@@ -1,0 +1,56 @@
+# GPU build: FrugalOmnibuild + a bundled CUDA llama.cpp server for local AI
+# sheet reading. Build on a host with the NVIDIA Container Toolkit and run with
+# `--gpus all`. See docs/ai-sheet-reading-runbook.md.
+#
+#   docker build -f Dockerfile.cuda -t frugalomnibuild:cuda .
+#   docker run --gpus all -v /path/to/models:/models -p 3000:3000 frugalomnibuild:cuda
+#
+# We base directly on the prebuilt CUDA llama.cpp server image so the
+# `llama-server` binary, its shared libraries, and the CUDA runtime are all from
+# the same distro (avoids GLIBC/GLIBCXX mismatches from copying binaries across
+# base images). We just add Node 22 + our app on top.
+FROM ghcr.io/ggml-org/llama.cpp:server-cuda
+
+# Some base images run as a non-root user; ensure apt works.
+USER root
+
+# The bundled llama-server keeps its shared libs in /app and relied on the base
+# image's own entrypoint/env to find them. We reset the entrypoint and spawn the
+# binary from our Node process, so register /app with the linker cache to make
+# the libs (e.g. libllama-server-impl.so) resolvable regardless of how it starts.
+RUN echo "/app" > /etc/ld.so.conf.d/llama.conf && ldconfig
+
+# Node 22 + build tools for native modules (better-sqlite3 -> node-gyp).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gnupg python3 build-essential \
+ && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+# Keep our app separate from the base image's /app (which holds llama-server).
+WORKDIR /srv/app
+
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+
+COPY . .
+RUN npm run build
+
+# NODE_ENV is set AFTER install/build so devDependencies (tsx, vite) are present.
+ENV NODE_ENV=production
+ENV STORAGE_PATH=/app/data
+ENV PORT=3000
+
+# AI configuration — the bundled llama-server + model download cache (volume).
+ENV AI_LLAMA_SERVER_BIN=/app/llama-server
+ENV AI_MODELS_DIR=/models
+ENV LLAMA_CACHE=/models
+VOLUME ["/models"]
+
+EXPOSE 3000
+RUN mkdir -p /app/data /models
+
+# The base image sets llama-server as its entrypoint — reset it so our Node
+# server runs (it spawns llama-server itself).
+ENTRYPOINT []
+CMD ["npx", "tsx", "server.ts"]

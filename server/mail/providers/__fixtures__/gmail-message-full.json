@@ -1,0 +1,183 @@
+{
+  "id": "m1",
+  "threadId": "t1",
+  "labelIds": [
+    "UNREAD",
+    "STARRED",
+    "CATEGORY_PERSONAL",
+    "IMPORTANT",
+    "INBOX"
+  ],
+  "snippet": "Mike here &mdash; see the attached COR-4 for the Level 6 revisions.",
+  "historyId": "1001",
+  "internalDate": "1772720400000",
+  "sizeEstimate": 194823,
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/mixed",
+    "filename": "",
+    "headers": [
+      {
+        "name": "Delivered-To",
+        "value": "me@x"
+      },
+      {
+        "name": "MIME-Version",
+        "value": "1.0"
+      },
+      {
+        "name": "Date",
+        "value": "Thu, 5 Mar 2026 09:20:00 -0500"
+      },
+      {
+        "name": "References",
+        "value": "<root-1@birchwoodplaster.example> <reply-2@tidewater.example>"
+      },
+      {
+        "name": "In-Reply-To",
+        "value": "<reply-2@tidewater.example>"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<CAB9Xyz.4.Qm@mail.gmail.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Re: COR-4 Level 6 revisions"
+      },
+      {
+        "name": "From",
+        "value": "Mike Ross <Mike@Tidewater.example>"
+      },
+      {
+        "name": "To",
+        "value": "\"Noah\" <me@x>"
+      },
+      {
+        "name": "Cc",
+        "value": "ap@tidewater.example, pm@tidewater.example"
+      },
+      {
+        "name": "Content-Type",
+        "value": "multipart/mixed; boundary=\"000000000000a1b2c3\""
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "multipart/related",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "multipart/related; boundary=\"000000000000d4e5f6\""
+          }
+        ],
+        "body": {
+          "size": 0
+        },
+        "parts": [
+          {
+            "partId": "0.0",
+            "mimeType": "multipart/alternative",
+            "filename": "",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "multipart/alternative; boundary=\"0000000000001a2b3c\""
+              }
+            ],
+            "body": {
+              "size": 0
+            },
+            "parts": [
+              {
+                "partId": "0.0.0",
+                "mimeType": "text/plain",
+                "filename": "",
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "text/plain; charset=\"UTF-8\""
+                  }
+                ],
+                "body": {
+                  "size": 77,
+                  "data": "TWlrZSBoZXJlIC0tIHNlZSB0aGUgYXR0YWNoZWQgQ09SLTQgZm9yIHRoZSBMZXZlbCA2IHJldmlzaW9ucy4KClRoYW5rcywKTWlrZQo"
+                }
+              },
+              {
+                "partId": "0.0.1",
+                "mimeType": "text/html",
+                "filename": "",
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "text/html; charset=\"UTF-8\""
+                  }
+                ],
+                "body": {
+                  "size": 138,
+                  "data": "PGRpdiBkaXI9Imx0ciI-PHA-TWlrZSBoZXJlICZtZGFzaDsgc2VlIHRoZSBhdHRhY2hlZCA8Yj5DT1ItNDwvYj4gZm9yIHRoZSBMZXZlbCA2IHJldmlzaW9ucy48L3A-PGltZyBzcmM9ImNpZDppaV9zaWdfMDAxIiBhbHQ9InNpZyI-PC9kaXY-"
+                }
+              }
+            ]
+          },
+          {
+            "partId": "0.1",
+            "mimeType": "image/png",
+            "filename": "signature.png",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "image/png; name=\"signature.png\""
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "inline; filename=\"signature.png\""
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "base64"
+              },
+              {
+                "name": "Content-ID",
+                "value": "<ii_sig_001>"
+              }
+            ],
+            "body": {
+              "attachmentId": "ANGjdJ_inline_png_9f3",
+              "size": 8123
+            }
+          }
+        ]
+      },
+      {
+        "partId": "1",
+        "mimeType": "application/pdf",
+        "filename": "COR-4.pdf",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/pdf; name=\"COR-4.pdf\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"COR-4.pdf\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ9x7QdVpk",
+          "size": 182734
+        }
+      }
+    ]
+  }
+}

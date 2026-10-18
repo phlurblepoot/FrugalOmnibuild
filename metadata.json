@@ -1,0 +1,5 @@
+{
+  "name": "FrugalOmnibuild",
+  "description": "A self-hosted construction takeoff and bid-management app: measure quantities on PDF plans, build proposals and bills, and work with your team in real time.",
+  "requestFramePermissions": []
+}

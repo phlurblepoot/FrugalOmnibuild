@@ -1,0 +1,25 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(message)",
+  "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/AAMkFolderInbox/messages/delta?$deltatoken=D2",
+  "value": [
+    {
+      "id": "m2",
+      "conversationId": "t2",
+      "internetMessageId": "<AS8PR01MB5678.EURPRD01.PROD.OUTLOOK.COM>",
+      "subject": "Dunmore Heights submittal log",
+      "bodyPreview": "Log attached in the portal.",
+      "receivedDateTime": "2026-08-11T09:00:00Z",
+      "sentDateTime": "2026-08-11T08:59:58Z",
+      "isRead": false,
+      "isDraft": false,
+      "hasAttachments": false,
+      "flag": { "flagStatus": "flagged" },
+      "parentFolderId": "AAMkFolderInbox",
+      "from": { "emailAddress": { "name": "Dana Kim", "address": "dana@tidewater.example" } },
+      "toRecipients": [{ "emailAddress": { "name": "Me", "address": "me@x" } }],
+      "ccRecipients": [],
+      "bccRecipients": []
+    },
+    { "@removed": { "reason": "deleted" }, "id": "m0" }
+  ]
+}

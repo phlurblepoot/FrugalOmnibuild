@@ -1,0 +1,29 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+data/
+data.db
+.superpowers/
+test-results/
+playwright-report/
+.e2e-data/
+e2e/.auth/
+
+# OMC tooling state
+.omc/
+docs/superpowers/.obsidian/
+.knowledge/
+
+# Demo company used for the README screenshots
+.demo-data/
+
+# Optional large plan set for the printout e2e spec
+docs/large-plan-set.pdf
+
+# Local Claude Code settings stay on this PC
+.claude/settings.json

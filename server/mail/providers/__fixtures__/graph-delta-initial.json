@@ -1,0 +1,50 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(message)",
+  "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/mailFolders/AAMkFolderInbox/messages/delta?$deltatoken=D1",
+  "value": [
+    {
+      "id": "m1",
+      "conversationId": "t1",
+      "internetMessageId": "<AS8PR01MB1234.EURPRD01.PROD.OUTLOOK.COM>",
+      "subject": "Re: COR-4 Level 6 revisions",
+      "bodyPreview": "Mike here — attached is the signed COR-4 for level 6.",
+      "receivedDateTime": "2026-08-10T14:22:05Z",
+      "sentDateTime": "2026-08-10T14:22:01Z",
+      "isRead": false,
+      "isDraft": false,
+      "hasAttachments": true,
+      "flag": { "flagStatus": "flagged" },
+      "parentFolderId": "AAMkFolderInbox",
+      "from": { "emailAddress": { "name": "Mike Ross", "address": "mike@tidewater.example" } },
+      "toRecipients": [{ "emailAddress": { "name": "", "address": "me@x" } }],
+      "ccRecipients": [
+        { "emailAddress": { "name": "AP", "address": "ap@tidewater.example" } },
+        { "emailAddress": { "name": "pm@tidewater.example", "address": "pm@tidewater.example" } }
+      ],
+      "bccRecipients": [],
+      "internetMessageHeaders": [
+        { "name": "In-Reply-To", "value": "<reply-2@tidewater.example>" },
+        { "name": "References", "value": "<root-1@birchwoodplaster.example> <reply-2@tidewater.example>" },
+        { "name": "X-Mailer", "value": "Microsoft Outlook 16.0" }
+      ]
+    },
+    {
+      "id": "m2",
+      "conversationId": "t2",
+      "internetMessageId": "<AS8PR01MB5678.EURPRD01.PROD.OUTLOOK.COM>",
+      "subject": "Dunmore Heights submittal log",
+      "bodyPreview": "Log attached in the portal.",
+      "receivedDateTime": "2026-08-11T09:00:00Z",
+      "sentDateTime": "2026-08-11T08:59:58Z",
+      "isRead": true,
+      "isDraft": false,
+      "hasAttachments": false,
+      "flag": { "flagStatus": "notFlagged" },
+      "parentFolderId": "AAMkFolderInbox",
+      "from": { "emailAddress": { "name": "Dana Kim", "address": "dana@tidewater.example" } },
+      "toRecipients": [{ "emailAddress": { "name": "Me", "address": "me@x" } }],
+      "ccRecipients": [],
+      "bccRecipients": []
+    }
+  ]
+}

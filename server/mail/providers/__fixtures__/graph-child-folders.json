@@ -1,0 +1,6 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('me')/mailFolders('AAMkFolderInbox')/childFolders",
+  "value": [
+    { "id": "AAMkFolderInboxTidewater", "displayName": "Tidewater", "wellKnownName": null, "unreadItemCount": 1, "totalItemCount": 12, "childFolderCount": 0 }
+  ]
+}

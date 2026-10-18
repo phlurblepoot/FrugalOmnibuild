@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>FrugalOmnibuild</title>
+    <!-- Installable app (phone push notifications need it on iPhone): server/pushRoutes.ts, public/icons -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- Anti-flash: apply dark class and accent colour vars before first paint -->
+    <script>
+      (function () {
+        var m = localStorage.getItem('theme-mode') || 'light';
+        var a = localStorage.getItem('theme-accent') || 'blue';
+        if (m === 'dark') document.documentElement.classList.add('dark');
+        var hues = { blue: 264, indigo: 283, emerald: 162, violet: 303, rose: 15, amber: 84 };
+        var h = hues[a] || 264;
+        var scales = [
+          [50, 0.97, 0.012], [100, 0.93, 0.032], [200, 0.87, 0.065], [300, 0.78, 0.12],
+          [400, 0.68, 0.17], [500, 0.60, 0.22], [600, 0.52, 0.24], [700, 0.44, 0.22],
+          [800, 0.36, 0.18], [900, 0.28, 0.14]
+        ];
+        var el = document.documentElement;
+        scales.forEach(function (s) {
+          el.style.setProperty('--color-accent-' + s[0], 'oklch(' + s[1] + ' ' + s[2] + ' ' + h + ')');
+        });
+        el.style.setProperty('--accent-h', String(h));
+        if (m === 'reduced') el.classList.add('motion-reduce');
+        if (localStorage.getItem('theme-surfaces') === 'solid') el.classList.add('solid-surfaces');
+        if (localStorage.getItem('theme-ambience') !== 'off') {
+          var hr = new Date().getHours();
+          el.dataset.daypart = (hr >= 5 && hr <= 10) ? 'morning' : (hr >= 11 && hr <= 16) ? 'midday' : 'evening';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

@@ -1,0 +1,12 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('me')/messages(body,uniqueBody)/$entity",
+  "id": "m1",
+  "body": {
+    "contentType": "html",
+    "content": "<html><body><p>Mike here &mdash; attached is the signed <b>COR-4</b> for level 6.</p><img src=\"cid:ii_sig_001\"></body></html>"
+  },
+  "uniqueBody": {
+    "contentType": "html",
+    "content": "<body><p>Mike here &mdash; attached is the signed <b>COR-4</b> for level 6.</p></body>"
+  }
+}

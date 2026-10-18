@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: plan-takeoff-app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      # A second, separate volume for BACKUP_PATH below — swap the host path
+      # for wherever this deployment's other disk is mounted.
+      # - /mnt/user/frugal-backups:/backups
+    environment:
+      - NODE_ENV=production
+      - STORAGE_PATH=/app/data
+      # ── Mail client (docs/mail-setup.md) ─────────────────────────────────
+      # All optional. Without them mail still works as IMAP-only, poll-only.
+      # The public HTTPS origin. OAuth redirect URIs and the Microsoft Graph
+      # webhook URL are built from it; unset, Connect returns 503 and Microsoft
+      # accounts poll instead of receiving push.
+      # - APP_PUBLIC_URL=https://takeoff.example.com
+      # 32 bytes as hex (64 chars) or base64, sealing stored mail credentials.
+      # Unset, the server generates /app/data/mail.key (0600) on first start —
+      # back that file up with the data directory.
+      # - MAIL_SECRET_KEY=
+      # - GOOGLE_OAUTH_CLIENT_ID=
+      # - GOOGLE_OAUTH_CLIENT_SECRET=
+      # - MS_OAUTH_CLIENT_ID=
+      # - MS_OAUTH_CLIENT_SECRET=
+      # Directory (tenant) ID for a single-tenant registration; default common.
+      # - MS_OAUTH_TENANT=common
+      # ── Backups (Settings → Backup) ───────────────────────────────────────
+      # Point this at a second volume so a backup isn't on the same disk as
+      # the data it protects. Unset, backups still work but write under
+      # /app/data (the Backup tab flags this in amber).
+      # - BACKUP_PATH=/backups
+      # ── ONLYOFFICE document editor (docs/onlyoffice-setup.md) ─────────────
+      # The HTTPS address browsers load the editor from: ONLYOFFICE's own
+      # subdomain. Unset, Settings → Document Editor reports "not configured".
+      # - ONLYOFFICE_PUBLIC_URL=https://docs.example.com
+      # How this app and ONLYOFFICE reach each other over the compose network.
+      - ONLYOFFICE_INTERNAL_URL=http://onlyoffice
+      - APP_INTERNAL_URL=http://app:3000
+      # Shared with the onlyoffice service below. Set it once in a .env file
+      # next to this compose file, e.g. ONLYOFFICE_JWT_SECRET=$(openssl rand -hex 32).
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
+    restart: unless-stopped
+
+  onlyoffice:
+    # Pinned: upgrade deliberately (read the ONLYOFFICE changelog first), never
+    # by pulling `latest`.
+    image: onlyoffice/documentserver:9.4.0.1
+    container_name: plan-takeoff-onlyoffice
+    # Only needed when the reverse proxy reaches containers by host IP and port
+    # rather than over a shared Docker network.
+    ports:
+      - "8088:80"
+    environment:
+      # Must equal the app's ONLYOFFICE_JWT_SECRET.
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-}
+      # The app sits on a private Docker network address; without this,
+      # ONLYOFFICE refuses to download files from it or post saves back.
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+    restart: unless-stopped

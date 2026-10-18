@@ -1,0 +1,12 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('me')/mailFolders",
+  "value": [
+    { "id": "AAMkFolderArchive", "displayName": "Archive", "wellKnownName": "archive", "unreadItemCount": 0, "totalItemCount": 918, "childFolderCount": 0 },
+    { "id": "AAMkFolderInbox", "displayName": "Inbox", "wellKnownName": "inbox", "unreadItemCount": 7, "totalItemCount": 4210, "childFolderCount": 1 },
+    { "id": "AAMkFolderSent", "displayName": "Sent Items", "wellKnownName": "sentitems", "unreadItemCount": 0, "totalItemCount": 1204, "childFolderCount": 0 },
+    { "id": "AAMkFolderDrafts", "displayName": "Drafts", "wellKnownName": "drafts", "unreadItemCount": 0, "totalItemCount": 3, "childFolderCount": 0 },
+    { "id": "AAMkFolderJunk", "displayName": "Junk Email", "wellKnownName": "junkemail", "unreadItemCount": 12, "totalItemCount": 61, "childFolderCount": 0 },
+    { "id": "AAMkFolderDeleted", "displayName": "Deleted Items", "wellKnownName": "deleteditems", "unreadItemCount": 1, "totalItemCount": 77, "childFolderCount": 0 },
+    { "id": "AAMkFolderBids", "displayName": "Bids", "wellKnownName": null, "unreadItemCount": 2, "totalItemCount": 40, "childFolderCount": 0 }
+  ]
+}
