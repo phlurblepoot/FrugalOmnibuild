@@ -320,7 +320,7 @@ describe('InvoiceEditor — photos + attachments', () => {
     fireEvent.click(await screen.findByTestId('doc-generate'));
 
     await waitFor(() => expect(h.buildInvoicePdf).toHaveBeenCalledTimes(1));
-    expect(h.buildInvoicePdf.mock.calls[0][0].photoDataUrls).toHaveLength(1);
+    expect(h.buildInvoicePdf.mock.calls[0][0].photos).toHaveLength(1);
     // The invoice's own bytes (photo pages included) go in first; the saved
     // record's attachments are appended to them.
     await waitFor(() => expect(h.appendAttachedPdfs).toHaveBeenCalledTimes(1));

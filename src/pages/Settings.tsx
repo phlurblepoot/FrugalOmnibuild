@@ -29,6 +29,14 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.4',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: photos in generated PDFs (proposals, daily reports, RFIs, issues, invoices and change orders) now come out the right way up. A photo taken upright on a phone used to come out sideways.',
+      'Fix: photos in those PDFs keep their shape instead of being stretched to fill a box, and they are bigger: still two per row, with a portrait photo as tall as a landscape one is wide.',
+    ],
+  },
+  {
     version: '4.6.3',
     date: 'October 28, 2026',
     changes: [

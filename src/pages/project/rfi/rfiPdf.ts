@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { drawPhotoGrid, type PdfPhoto } from '../../../utils/pdfPhotos';
 import { Rfi } from '../../../utils/store';
 import {
   LetterheadContext,
@@ -13,7 +14,7 @@ export interface RfiPdfContext {
   rfi: Rfi;
   projectName: string;
   contractor?: string | null;
-  photoDataUrls: string[]; // pre-fetched (caller resolves each fileId → dataURL)
+  photos: PdfPhoto[]; // pre-fetched and upright (caller loads each fileId with loadPdfPhoto)
   letterhead: LetterheadContext;
   headerEmail?: string;
 }
@@ -115,17 +116,9 @@ export function buildRfiPdf(ctx: RfiPdfContext): Uint8Array {
   }
 
   // Photos grid (2 per row)
-  if (ctx.photoDataUrls.length) {
+  if (ctx.photos.length) {
     sectionLabel('Photos');
-    const cellW = (W - 2 * M - 12) / 2, cellH = 150;
-    let col = 0;
-    for (const url of ctx.photoDataUrls) {
-      if (y + cellH > bottom) { newPage(); col = 0; }
-      const x = M + col * (cellW + 12);
-      try { doc.addImage(url, 'JPEG', x, y, cellW, cellH, undefined, 'FAST'); } catch { /* skip bad image */ }
-      col++;
-      if (col === 2) { col = 0; y += cellH + 12; }
-    }
+    y = drawPhotoGrid(doc, ctx.photos, { left: M, width: W - 2 * M, y, bottom, newPage: () => { newPage(); return y; } });
   }
 
   return doc.output('arraybuffer') as unknown as Uint8Array;

@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, PDFName, PDFRawStream, PDFDict } from 'pdf-lib';
+import sharp from 'sharp';
 import { test, expect, seedProjectWithPage } from './fixtures/test';
 
 // Characterization spec for the shared document-actions rollout (spec
@@ -112,6 +113,64 @@ test('issue editor: Add photos opens on the Upload tab; an uploaded image appear
   // closes itself.
   await expect(authedPage.getByTestId('picker-upload-panel')).toBeHidden({ timeout: 15_000 });
   await expect(editorDialog.locator('[data-testid="issue-photo-dropzone"] img')).toHaveCount(1);
+});
+
+test('issue report: a phone photo stored sideways comes out upright and unstretched', async ({
+  authedPage, apiToken, request,
+}) => {
+  const { token } = apiToken;
+  const auth = { Authorization: `Bearer ${token}` };
+  const { projectId } = await seedProjectWithPage(request, token);
+
+  // Like a phone's portrait shot: the pixels are stored landscape (400x300)
+  // with an EXIF tag saying "turn 90° clockwise". The red stripe is stored
+  // down the left edge, so upright it runs across the top.
+  const stripe = await sharp({ create: { width: 60, height: 300, channels: 3, background: '#ff0000' } }).png().toBuffer();
+  const sideways = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#2050c0' } })
+    .composite([{ input: stripe, left: 0, top: 0 }])
+    .withMetadata({ orientation: 6 })
+    .jpeg()
+    .toBuffer();
+
+  await authedPage.goto(`/project/${projectId}/issues`);
+  await authedPage.getByLabel('New issue').fill('E2E sideways photo');
+  await authedPage.getByRole('button', { name: 'Add issue' }).click();
+  const editorDialog = authedPage.getByRole('dialog');
+  await editorDialog.getByTestId('issue-photo-dropzone').getByTestId('add-files-button').click();
+  await authedPage.getByTestId('picker-upload-input').setInputFiles({ name: 'portrait.jpg', mimeType: 'image/jpeg', buffer: sideways });
+  await expect(authedPage.getByTestId('picker-upload-panel')).toBeHidden({ timeout: 15_000 });
+  await expect(editorDialog.locator('[data-testid="issue-photo-dropzone"] img')).toHaveCount(1);
+
+  await authedPage.getByTestId('doc-generate').click();
+  await expect(authedPage.getByTestId('doc-status')).toHaveText('PDF up to date', { timeout: 30_000 });
+
+  const issues = await (await request.get(`/api/projects/${projectId}/issues`, { headers: auth })).json();
+  const issueId = issues.find((i: { title: string }) => i.title === 'E2E sideways photo').id;
+  const doc = await (await request.get(
+    `/api/documents/by-source?sourceType=issue&sourceId=${issueId}&kind=issue-report`, { headers: auth },
+  )).json();
+  const pdf = await PDFDocument.load(await (await request.get(`/api/files/${doc.id}/content`, { headers: auth })).body());
+
+  // The embedded photo is portrait (upright), not the stored landscape pixels.
+  const images = pdf.getPages().flatMap(page => {
+    const xobjects = page.node.Resources()?.lookup(PDFName.of('XObject'), PDFDict);
+    return (xobjects?.values() ?? []).map(ref => pdf.context.lookup(ref)).filter((o): o is PDFRawStream =>
+      o instanceof PDFRawStream && o.dict.get(PDFName.of('Subtype')) === PDFName.of('Image'));
+  });
+  expect(images).toHaveLength(1);
+  const size = (k: string) => Number(images[0].dict.get(PDFName.of(k))?.toString());
+  expect(size('Width')).toBe(300);
+  expect(size('Height')).toBe(400);
+
+  // …and the stripe is across the top.
+  const { data, info } = await sharp(Buffer.from(images[0].contents)).raw().toBuffer({ resolveWithObject: true });
+  const px = (x: number, y: number) => Array.from(data.subarray((y * info.width + x) * info.channels, (y * info.width + x) * info.channels + 3));
+  const [r1, , b1] = px(150, 20);
+  expect(r1).toBeGreaterThan(200);
+  expect(b1).toBeLessThan(80);
+  const [r2, , b2] = px(150, 300);
+  expect(r2).toBeLessThan(80);
+  expect(b2).toBeGreaterThan(150);
 });
 
 test('issue editor: an attached PDF ends the generated report; removing it marks the report out of date', async ({

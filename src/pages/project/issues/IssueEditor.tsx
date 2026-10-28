@@ -18,6 +18,7 @@ import { buildIssuePdf } from './issuePdf';
 import { appendAttachedPdfs } from '../../../utils/pdfAttachments';
 import { hexToRgb, invertImageDataUrl } from '../../../utils/documentLetterhead';
 import { useDiscardGuard } from '../../../components/ui/useDiscardGuard';
+import { loadPdfPhoto, type PdfPhoto } from '../../../utils/pdfPhotos';
 
 export const IssueEditor: React.FC<{
   issue: Issue;
@@ -76,19 +77,19 @@ export const IssueEditor: React.FC<{
     if (logoDataUrl && settings.invertLogoOnDocuments === 'true') {
       logoDataUrl = await invertImageDataUrl(logoDataUrl);
     }
-    // fetch each photo as a dataURL (authenticated content endpoint)
-    const photoDataUrls: string[] = [];
+    // fetch each photo (authenticated content endpoint), turned upright for the PDF
+    const photos: PdfPhoto[] = [];
     for (const p of saved.photos) {
       try {
-        const blob = await fetchFileBlob(p.fileId);
-        photoDataUrls.push(await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); }));
+        const photo = await loadPdfPhoto(await fetchFileBlob(p.fileId));
+        if (photo) photos.push(photo);
       } catch { /* skip */ }
     }
     const bytes = buildIssuePdf({
       issue: saved,
       projectName: projectName,
       contractor: contractor,
-      photoDataUrls,
+      photos,
       letterhead: {
         brandRgb: hexToRgb(settings.companyBrandColor || '#99CB38'),
         company: {

@@ -29,6 +29,7 @@ import {
   measurementRings,
 } from '../../../utils/math';
 import { measurementMultiplier, formatMultiplied } from '../../../utils/multiplier';
+import { layoutPhotoRows, drawPhoto, PHOTO_GAP, type PdfPhoto } from '../../../utils/pdfPhotos';
 
 // Converts a data URL (e.g. "data:application/pdf;base64,...") to a fresh Uint8Array.
 export function dataUrlToUint8Array(dataUrl: string): Uint8Array {
@@ -593,7 +594,7 @@ export interface ProposalRenderInput {
   /** Current (non-superseded) page ids, for the highlights merge. */
   currentPageIds: Set<string>;
   letterhead: LetterheadContext;
-  photos: { dataUrl: string; caption: string | null }[];
+  photos: (PdfPhoto & { caption: string | null })[];
   /** Attachment PDF bytes, in arranged order — appended untouched. */
   attachments: ArrayBuffer[];
   includeHighlights: boolean;
@@ -1134,34 +1135,27 @@ export async function generateProposalPdf(
     });
   }
 
-  // ── Photos (2-up, captions under each) ────────────────────────────────────
+  // ── Photos (2-up, each at its own shape, captions under each) ─────────────
   if (photos.length) {
     onProgress?.('Adding photos…');
-    const gap = 12, cellW = (W - 2 * M - gap) / 2, cellH = 150, capH = 14;
+    const capH = 14;
+    const rows = layoutPhotoRows(doc, photos, M, W - 2 * M);
     keepTogether('Photos', 'photos', () => {
-      let col = 0;
-      for (const ph of photos) {
+      for (const row of rows) {
         // Only the START of a row may break, so an image never parts company
         // with its caption. A grid taller than a sheet fills rows and continues.
-        if (col === 0) ensure(cellH + capH);
-        const x = M + col * (cellW + gap);
-        if (!measuring) {
-          try {
-            doc.addImage(ph.dataUrl, 'JPEG', x, y, cellW, cellH, undefined, 'FAST');
-          } catch (e) {
-            console.warn('[proposal] skipped unreadable photo', e);
+        ensure(row.height + capH);
+        for (const cell of row.cells) {
+          if (!measuring) drawPhoto(doc, cell, y);
+          if (cell.photo.caption) {
+            doc.setFontSize(8);
+            doc.setFont(font, 'italic');
+            doc.setTextColor(71, 85, 105);
+            doc.text((doc.splitTextToSize(cell.photo.caption, row.cellW) as string[])[0], cell.cellX, y + row.height + 10);
           }
         }
-        if (ph.caption) {
-          doc.setFontSize(8);
-          doc.setFont(font, 'italic');
-          doc.setTextColor(71, 85, 105);
-          doc.text((doc.splitTextToSize(ph.caption, cellW) as string[])[0], x, y + cellH + 10);
-        }
-        col++;
-        if (col === 2) { col = 0; y += cellH + capH + gap; }
+        y += row.height + capH + PHOTO_GAP;
       }
-      if (col === 1) y += cellH + capH + gap; // a lone trailing image owns its row
     });
   }
 

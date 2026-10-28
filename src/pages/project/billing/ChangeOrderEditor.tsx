@@ -24,6 +24,7 @@ import { appendAttachedPdfs } from '../../../utils/pdfAttachments';
 import { hexToRgb, invertImageDataUrl } from '../../../utils/documentLetterhead';
 import { lineCents, draftTotalCents, lineContentKey } from './InvoiceEditor';
 import { useDiscardGuard } from '../../../components/ui/useDiscardGuard';
+import { loadPdfPhoto, type PdfPhoto } from '../../../utils/pdfPhotos';
 
 export const ChangeOrderEditor: React.FC<{
   changeOrder: ChangeOrder;
@@ -156,12 +157,12 @@ export const ChangeOrderEditor: React.FC<{
     if (logoDataUrl && settings.invertLogoOnDocuments === 'true') {
       logoDataUrl = await invertImageDataUrl(logoDataUrl);
     }
-    // fetch each photo as a dataURL (authenticated content endpoint)
-    const photoDataUrls: string[] = [];
+    // fetch each photo (authenticated content endpoint), turned upright for the PDF
+    const photos: PdfPhoto[] = [];
     for (const p of saved.photos) {
       try {
-        const blob = await fetchFileBlob(p.fileId);
-        photoDataUrls.push(await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); }));
+        const photo = await loadPdfPhoto(await fetchFileBlob(p.fileId));
+        if (photo) photos.push(photo);
       } catch { /* skip */ }
     }
     const bytes = buildChangeOrderPdf({
@@ -179,7 +180,7 @@ export const ChangeOrderEditor: React.FC<{
         },
         logoDataUrl,
       },
-      photoDataUrls,
+      photos,
       headerEmail: headerEmail || undefined,
     });
     // Attached PDFs go last, after the photo pages, in attachment order.

@@ -217,7 +217,7 @@ describe('proposal layout', () => {
   it('terms share the cover page; only the photo grid needs a second sheet', async () => {
     const p = base({ lines: [line({})], terms: 'Pay on time.' });
     const { pdfBytes, sections } = await generateProposalPdf(input(p, {
-      photos: [{ dataUrl: JPEG, caption: 'North' }, { dataUrl: JPEG, caption: null }, { dataUrl: JPEG, caption: 'x' }],
+      photos: [{ dataUrl: JPEG, width: 4, height: 3, caption: 'North' }, { dataUrl: JPEG, width: 4, height: 3, caption: null }, { dataUrl: JPEG, width: 4, height: 3, caption: 'x' }],
     }));
     // Cover + pricing + terms all fit on one sheet; a photo row does not.
     expect(await pages(pdfBytes)).toBe(2);
@@ -233,7 +233,7 @@ describe('proposal layout', () => {
       terms: 'Net 30.',
     });
     const { pdfBytes, sections } = await generateProposalPdf(input(p, {
-      photos: [{ dataUrl: JPEG, caption: 'North' }, { dataUrl: JPEG, caption: 'South' }],
+      photos: [{ dataUrl: JPEG, width: 4, height: 3, caption: 'North' }, { dataUrl: JPEG, width: 4, height: 3, caption: 'South' }],
     }));
     // Four sections that each used to claim a sheet now occupy two.
     expect(await pages(pdfBytes)).toBeLessThanOrEqual(2);
@@ -404,7 +404,7 @@ describe('proposal layout', () => {
     });
     const { sections } = await generateProposalPdf(input(p, {
       takeoffTotals: [takeoff],
-      photos: [{ dataUrl: JPEG, caption: 'West wall' }],
+      photos: [{ dataUrl: JPEG, width: 4, height: 3, caption: 'West wall' }],
       attachments: [await makePdf(1)],
     }));
 
