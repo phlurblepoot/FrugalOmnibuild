@@ -29,6 +29,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.3',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: with "Set type per file" ticked in Save to Documents (from Mail) and Upload documents, each file\'s Type box no longer stretches across the row and hides the file name. The name sits on the left and the Type on the right; on a phone the Type drops onto its own line under the name.',
+      'Change: each file\'s type is guessed when you add it: photos as Photo, spreadsheets as Spreadsheet, everything else as Document. When the files are of different types, "Set type per file" turns on by itself. While it is on, the shared Type box is hidden.',
+      'Fix: boxes that were meant to be narrow now are, for example the backup time, the Tasks filters, invoice and change order quantity and price, and the payment fields. They were stretching to full width.',
+    ],
+  },
+  {
     version: '4.6.2',
     date: 'October 28, 2026',
     changes: [

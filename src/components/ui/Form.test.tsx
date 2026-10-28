@@ -47,4 +47,23 @@ describe('Form controls', () => {
     fireEvent.click(screen.getByLabelText('Include photos'));
     expect(onChange).toHaveBeenCalled();
   });
+
+  it('controls are full width unless the caller sets its own width', () => {
+    render(
+      <>
+        <Select aria-label="full"><option>a</option></Select>
+        <Select aria-label="narrow" className="w-40"><option>a</option></Select>
+        <Input aria-label="auto" className="h-9 w-auto" />
+        <Input aria-label="responsive" className="sm:w-56" />
+        <Textarea aria-label="min" className="min-w-0" />
+      </>
+    );
+    expect(screen.getByLabelText('full')).toHaveClass('w-full');
+    expect(screen.getByLabelText('narrow')).toHaveClass('w-40');
+    expect(screen.getByLabelText('narrow')).not.toHaveClass('w-full');
+    expect(screen.getByLabelText('auto')).not.toHaveClass('w-full');
+    // A width only from sm: up still needs the full-width base below it.
+    expect(screen.getByLabelText('responsive')).toHaveClass('w-full', 'sm:w-56');
+    expect(screen.getByLabelText('min')).toHaveClass('w-full', 'min-w-0');
+  });
 });
