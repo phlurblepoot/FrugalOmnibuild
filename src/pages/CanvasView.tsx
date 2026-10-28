@@ -1767,7 +1767,7 @@ const CanvasViewInner: React.FC = () => {
                 <select
                   value={page.scaleConfig?.label || (page.scaleConfig ? 'custom' : '')}
                   onChange={handleStandardScaleChange}
-                  className="w-full border border-edge-strong rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised"
+                  className="w-full border border-edge-strong rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
                 >
                   <option value="" disabled>Select a scale...</option>
                   <option value="custom">Custom (Calibrated)</option>
@@ -1807,7 +1807,7 @@ const CanvasViewInner: React.FC = () => {
                 {page.scaleRegions.map(region => (
                   <div 
                     key={region.id} 
-                    className={`border rounded-lg p-2 transition-colors cursor-pointer ${selectedRegionId === region.id ? 'bg-accent-50 border-accent-300' : 'bg-sunken border-edge hover:bg-hover'}`}
+                    className={`border rounded-lg p-2 transition-colors cursor-pointer ${selectedRegionId === region.id ? 'bg-accent-50 border-accent-300 dark:bg-accent-900/20 dark:border-accent-800' : 'bg-sunken border-edge hover:bg-hover'}`}
                     onClick={() => setSelectedRegionId(region.id === selectedRegionId ? null : region.id)}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -1833,7 +1833,7 @@ const CanvasViewInner: React.FC = () => {
                           setProject(updatedProject);
                           setPage(updatedProject.pages.find(p => p.id === page.id) || page);
                         }}
-                        className="text-xs font-semibold bg-transparent border-none p-0 focus:ring-0 w-24"
+                        className="text-xs font-semibold text-ink bg-transparent border-none p-0 focus:ring-0 w-24"
                       />
                       <button 
                         onClick={async (e) => {
@@ -1897,7 +1897,7 @@ const CanvasViewInner: React.FC = () => {
                           setProject(updatedProject);
                           setPage(updatedProject.pages.find(p => p.id === page.id) || page);
                         }}
-                        className="w-full border border-edge-strong rounded px-2 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-accent-500 bg-raised"
+                        className="w-full border border-edge-strong rounded px-2 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-accent-500 bg-raised text-ink"
                       >
                         <option value="" disabled>Select a scale...</option>
                         <option value="custom">Custom (Calibrated)</option>
@@ -2580,7 +2580,7 @@ const CanvasViewInner: React.FC = () => {
                     type="text"
                     value={editingTakeoff.type}
                     disabled
-                    className="w-full border border-edge rounded-xl px-4 py-2.5 bg-sunken text-ink-soft capitalize"
+                    className="w-full border border-edge rounded-xl px-4 py-2.5 bg-raised text-ink-soft capitalize opacity-70"
                   />
                 </div>
                 <div>
@@ -2640,7 +2640,7 @@ const CanvasViewInner: React.FC = () => {
                         if (result !== null) setEditTakeoffCostPerUnit(result.toString());
                       }
                     }}
-                    className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink disabled:bg-sunken disabled:text-ink-faint"
+                    className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint disabled:opacity-60 disabled:text-ink-faint"
                     placeholder={isEditTakeoffAdvanced ? "Disabled in Advanced" : "0.00 or =95*40%"}
                   />
                 </div>
@@ -2875,7 +2875,7 @@ function HeightsModal({
                 <NumberInput allowEmpty unstyled
                   value={globalHeight}
                   onChange={e => setGlobalHeight(e.target.value)}
-                  className="w-full border border-edge-strong rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  className="w-full border border-edge-strong rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
                   placeholder="Height"
                   autoFocus
                 />
@@ -2896,7 +2896,7 @@ function HeightsModal({
                     newHeights[i] = e.target.value;
                     setHeights(newHeights);
                   }}
-                  className="w-full border border-edge-strong rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  className="w-full border border-edge-strong rounded-lg px-3 py-2 pr-8 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
                   placeholder="Height"
                 />
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-ink-faint">

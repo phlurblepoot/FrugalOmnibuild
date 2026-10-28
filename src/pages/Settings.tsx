@@ -29,6 +29,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.2',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: in dark mode, text you type is no longer black on a dark box. This covers the takeoff canvas (Advanced Costing, Wall Heights, renaming a measurement, the page and region scale lists) and any other box in the app that was missing its own text colour.',
+      'Change: in dark mode, the canvas filter box, the takeoff total badges and greyed-out fields now match the panels around them instead of showing as near-black boxes.',
+      'Change: the Project Notes board stays white like paper in dark mode too, so black notes text stays readable.',
+    ],
+  },
+  {
     version: '4.6.1',
     date: 'October 28, 2026',
     changes: [

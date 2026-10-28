@@ -338,7 +338,7 @@ describe('ProjectDailyReports — crews', () => {
 
     await rtlWaitFor(() => expect(crewApi.createDailyReportCrew).toHaveBeenCalledWith('p1', 'Acme Lath'));
     await rtlWaitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(screen.getByTestId('search')).toHaveTextContent('?crew=c4');
+    await rtlWaitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('?crew=c4'));
     expect(await screen.findByRole('tab', { name: 'Acme Lath' })).toHaveAttribute('aria-selected', 'true');
   });
 

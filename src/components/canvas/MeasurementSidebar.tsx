@@ -164,7 +164,7 @@ export function MeasurementSidebar({
                 value={measurementFilter}
                 onChange={(e) => setMeasurementFilter(e.target.value)}
                 placeholder="Filter takeoffs & measurements..."
-                className="w-full text-xs border border-edge rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-sunken text-ink placeholder-ink-faint"
+                className="w-full text-xs border border-edge rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
             </div>
 
@@ -334,7 +334,7 @@ export function MeasurementSidebar({
                       </div>
                     </div>
                     <div className="flex flex-col items-end shrink-0 ml-2">
-                      <span data-testid="takeoff-total" className={`text-xs font-bold px-2 py-1 rounded-lg border transition-all ${isActive ? 'bg-accent-600 text-white border-accent-700 shadow-sm' : 'bg-sunken text-ink border-edge'}`}>
+                      <span data-testid="takeoff-total" className={`text-xs font-bold px-2 py-1 rounded-lg border transition-all ${isActive ? 'bg-accent-600 text-white border-accent-700 shadow-sm' : 'bg-raised text-ink border-edge'}`}>
                         {formatRealValue(takeoff.totalRealValue, takeoff.type as 'length' | 'area' | 'count', page.scaleConfig?.unit || 'ft', takeoff, false)}
                       </span>
                       {(takeoff.costPerUnit || takeoff.isAdvancedCost) && (
@@ -402,7 +402,7 @@ export function MeasurementSidebar({
                             >
                               {p.name}
                             </Link>
-                            <span className="text-sm font-semibold text-ink bg-sunken px-2 py-0.5 rounded-full">
+                            <span className="text-sm font-semibold text-ink bg-sunken dark:bg-white/10 px-2 py-0.5 rounded-full">
                               {count}
                             </span>
                           </div>

@@ -37,7 +37,7 @@ export const CustomCostRow: React.FC<{
         <select
           value={item.type}
           onChange={(e) => onChange(index, { ...item, type: e.target.value as any })}
-          className="text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-sunken text-ink"
+          className="text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
         >
           <option value="flat">Flat Cost</option>
           <option value="yield">Material Yield</option>

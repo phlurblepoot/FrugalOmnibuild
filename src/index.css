@@ -282,7 +282,13 @@ html.solid-surfaces body { background: var(--surface) !important; }
 .motion-reduce .chart-draw { animation: none; stroke-dashoffset: 0; }
 .motion-reduce .palette-row-cascade { animation: none; }
 
-.dark body {
+/* Text defaults to the theme's ink, so a control without its own text colour
+   (inputs inherit it) is never left browser-black on a dark field. The colour
+   scheme sits on <html> too, so native controls and scrollbars match. */
+html {
+  color: var(--ink);
+}
+.dark {
   color-scheme: dark;
 }
 

@@ -120,7 +120,7 @@ export function MeasurementItem({
                     setIsEditing(false);
                   }
                 }}
-                className="text-sm border border-accent-300 rounded px-1 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-accent-500"
+                className="text-sm border border-accent-300 rounded px-1 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-accent-500 bg-raised text-ink"
                 autoFocus
                 onClick={(e) => e.stopPropagation()}
               />

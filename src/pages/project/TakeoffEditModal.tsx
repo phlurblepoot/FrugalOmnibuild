@@ -68,7 +68,7 @@ export function TakeoffEditModal({
               type="text"
               value={editTakeoffName}
               onChange={(e) => setEditTakeoffName(e.target.value)}
-              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500"
+              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               placeholder="e.g. Hardwood Flooring"
               autoFocus
             />
@@ -82,7 +82,7 @@ export function TakeoffEditModal({
               list="price-package-options-edit"
               value={editTakeoffPricePackage}
               onChange={(e) => setEditTakeoffPricePackage(e.target.value)}
-              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500"
+              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               placeholder="e.g. Flooring Package"
             />
             <datalist id="price-package-options-edit">
@@ -99,7 +99,7 @@ export function TakeoffEditModal({
                 type="text"
                 value={editingTakeoff.type}
                 disabled
-                className="w-full border border-edge rounded-xl px-4 py-2.5 bg-sunken text-ink-soft capitalize"
+                className="w-full border border-edge rounded-xl px-4 py-2.5 bg-raised text-ink-soft capitalize opacity-70"
               />
             </div>
             <div>
@@ -154,7 +154,7 @@ export function TakeoffEditModal({
                 disabled={isEditTakeoffAdvanced}
                 value={isEditTakeoffAdvanced ? '' : editTakeoffCostPerUnit}
                 onChange={(e) => setEditTakeoffCostPerUnit(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 disabled:bg-sunken disabled:text-ink-faint"
+                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint disabled:opacity-60 disabled:text-ink-faint"
                 placeholder={isEditTakeoffAdvanced ? "Disabled in Advanced" : "0.00"}
               />
             </div>

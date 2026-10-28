@@ -237,7 +237,7 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
                     if (result !== null) setCostPerUnit(result.toString());
                   }
                 }}
-                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink disabled:bg-sunken disabled:text-ink-faint"
+                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint disabled:opacity-60 disabled:text-ink-faint"
                 placeholder={isAdvanced ? 'Disabled in Advanced' : '0.00 or =95*40%'}
               />
             </div>
