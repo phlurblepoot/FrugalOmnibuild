@@ -263,8 +263,8 @@ export const InvoiceEditor: React.FC<{
             {lines.map((l, i) => (
               <TR key={i}>
                 <TD><Input value={l.description} onChange={e => setLine(i, { description: e.target.value })} /></TD>
-                <TD className="w-20"><NumberInput value={String(l.qty)} onChange={e => setLine(i, { qty: parseFloat(e.target.value) || 0 })} /></TD>
-                <TD className="w-28"><NumberInput value={String(l.unitPrice)} onChange={e => setLine(i, { unitPrice: parseFloat(e.target.value) || 0 })} /></TD>
+                <TD className="w-20"><NumberInput allowEmpty value={String(l.qty)} onChange={e => setLine(i, { qty: parseFloat(e.target.value) || 0 })} /></TD>
+                <TD className="w-28"><NumberInput allowEmpty value={String(l.unitPrice)} onChange={e => setLine(i, { unitPrice: parseFloat(e.target.value) || 0 })} /></TD>
                 <TD className="text-ink-soft">{formatMoney(lineCents(l))}</TD>
                 <TD><button onClick={() => removeLine(i)} title="Remove" className="rounded-md p-1 text-ink-faint hover:bg-hover hover:text-red-600"><Trash2 size={14} /></button></TD>
               </TR>

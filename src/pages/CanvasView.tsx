@@ -15,7 +15,7 @@ import { calculatePolylineLength, measurementAreaPx, calculateRealValue, parseFe
 import { getProject, saveProject, getImage, getImageUrl, getTemplates, noteProjectVersion } from '../utils/store';
 import { CollaborationProvider, useCollaboration } from '../context/CollaborationContext';
 import { useNotes } from '../context/NotesContext';
-import { CustomCostRow } from '../components/CustomCostRow';
+import { CustomCostRow, costLineForEditing } from '../components/CustomCostRow';
 import { useMeasurementHistory } from '../hooks/useMeasurementHistory';
 import { computeRevisionModel, effectiveSheetId } from '../utils/planSets';
 import { summarizeSelection } from '../utils/segmentValue';
@@ -1263,14 +1263,7 @@ const CanvasViewInner: React.FC = () => {
     setEditTakeoffUnit(rawTakeoff.unit || '');
     setEditTakeoffCostPerUnit(rawTakeoff.costPerUnit?.toString() || '');
     setIsEditTakeoffAdvanced(rawTakeoff.isAdvancedCost || false);
-    setEditTakeoffCustomCosts(rawTakeoff.customCosts?.map(c => ({
-      ...c,
-      cost: c.cost?.toString() || '0',
-      yield: c.yield?.toString() || '0',
-      costPerUnit: c.costPerUnit?.toString() || '0',
-      amount: c.amount?.toString() || '0',
-      perUnits: c.perUnits?.toString() || '0',
-    })) || []);
+    setEditTakeoffCustomCosts(rawTakeoff.customCosts?.map(costLineForEditing) || []);
   };
 
   const handleSaveEditTakeoff = async () => {
@@ -2672,7 +2665,7 @@ const CanvasViewInner: React.FC = () => {
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="text-xs font-bold text-ink-faint uppercase tracking-wider">Advanced Costing</h4>
                     <button
-                      onClick={() => setEditTakeoffCustomCosts([...editTakeoffCustomCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: '0' }])}
+                      onClick={() => setEditTakeoffCustomCosts([...editTakeoffCustomCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: '' }])}
                       className="text-[10px] flex items-center gap-1 text-accent-600 hover:text-accent-700 font-bold uppercase tracking-tight"
                     >
                       <Plus size={12} />
@@ -2843,11 +2836,12 @@ function HeightsModal({
   const hasExistingPerPoint = measurement.heights && measurement.heights.length > 1 &&
     measurement.heights.some((h, i) => i > 0 && h !== measurement.heights![0]);
   const [perPoint, setPerPoint] = useState(hasExistingPerPoint || false);
+  // A saved 0 (an empty box on the last save) reopens empty, not as a "0" to type after.
   const [globalHeight, setGlobalHeight] = useState<string>(
-    measurement.heights ? (measurement.heights[0]?.toString() || '') : ''
+    measurement.heights?.[0] ? measurement.heights[0].toString() : ''
   );
   const [heights, setHeights] = useState<string[]>(
-    measurement.heights?.map(h => h.toString()) || Array(measurement.points.length).fill('')
+    measurement.heights?.map(h => (h ? h.toString() : '')) || Array(measurement.points.length).fill('')
   );
   const [isTwoSided, setIsTwoSided] = useState(measurement.isTwoSided || false);
 

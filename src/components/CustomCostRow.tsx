@@ -2,6 +2,18 @@ import React from 'react';
 import { Trash2 } from 'lucide-react';
 import { evaluateMathExpression } from '../utils/math';
 
+// A cost box's text. A saved 0 (or nothing) shows as an empty box with a faded
+// "0" placeholder, so typing never lands next to a 0; an empty box saves as 0.
+export const costFieldText = (v: unknown): string =>
+  v === undefined || v === null || v === 0 ? '' : String(v);
+
+// The text boxes for a saved cost line, ready to edit.
+export const costLineForEditing = <T extends object>(c: T): T => {
+  const out: any = { ...c };
+  for (const k of ['cost', 'yield', 'costPerUnit', 'amount', 'perUnits']) out[k] = costFieldText(out[k]);
+  return out;
+};
+
 export const CustomCostRow: React.FC<{
   item: any;
   index: number;
@@ -25,7 +37,7 @@ export const CustomCostRow: React.FC<{
         <select
           value={item.type}
           onChange={(e) => onChange(index, { ...item, type: e.target.value as any })}
-          className="text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-sunken"
+          className="text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-sunken text-ink"
         >
           <option value="flat">Flat Cost</option>
           <option value="yield">Material Yield</option>
@@ -37,7 +49,7 @@ export const CustomCostRow: React.FC<{
           value={item.name}
           onChange={(e) => onChange(index, { ...item, name: e.target.value })}
           placeholder="Line Name"
-          className="flex-1 text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500"
+          className="flex-1 text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
         />
         <button
           onClick={() => onRemove(index)}
@@ -47,7 +59,7 @@ export const CustomCostRow: React.FC<{
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center pl-2 border-l-2 border-accent-100">
+      <div className="flex flex-wrap gap-2 items-center pl-2 border-l-2 border-accent-100 dark:border-accent-800">
         {item.type === 'flat' && (
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold text-ink-faint uppercase">Cost:</span>
@@ -55,10 +67,11 @@ export const CustomCostRow: React.FC<{
               <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
               <input
                 type="text"
-                value={item.cost || '0'}
+                value={costFieldText(item.cost)}
+                placeholder="0"
                 onChange={(e) => onChange(index, { ...item, cost: e.target.value })}
                 onBlur={(e) => handleMathBlur('cost', e.target.value)}
-                className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
             </div>
           </div>
@@ -70,10 +83,11 @@ export const CustomCostRow: React.FC<{
               <span className="text-[10px] font-bold text-ink-faint uppercase">Yield:</span>
               <input
                 type="text"
-                value={item.yield || '0'}
+                value={costFieldText(item.yield)}
+                placeholder="0"
                 onChange={(e) => onChange(index, { ...item, yield: e.target.value })}
                 onBlur={(e) => handleMathBlur('yield', e.target.value)}
-                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
               <span className="text-[10px] text-ink-soft">{unitLabel} per unit</span>
             </div>
@@ -84,7 +98,7 @@ export const CustomCostRow: React.FC<{
                 value={item.unit || ''}
                 onChange={(e) => onChange(index, { ...item, unit: e.target.value })}
                 placeholder="e.g. bags"
-                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -93,10 +107,11 @@ export const CustomCostRow: React.FC<{
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
                 <input
                   type="text"
-                  value={item.cost || '0'}
+                  value={costFieldText(item.cost)}
+                  placeholder="0"
                   onChange={(e) => onChange(index, { ...item, cost: e.target.value })}
                   onBlur={(e) => handleMathBlur('cost', e.target.value)}
-                  className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
                 />
               </div>
             </div>
@@ -110,10 +125,11 @@ export const CustomCostRow: React.FC<{
               <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
               <input
                 type="text"
-                value={item.costPerUnit || '0'}
+                value={costFieldText(item.costPerUnit)}
+                placeholder="0"
                 onChange={(e) => onChange(index, { ...item, costPerUnit: e.target.value })}
                 onBlur={(e) => handleMathBlur('costPerUnit', e.target.value)}
-                className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
             </div>
           </div>
@@ -127,10 +143,11 @@ export const CustomCostRow: React.FC<{
                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
                 <input
                   type="text"
-                  value={item.amount || '0'}
+                  value={costFieldText(item.amount)}
+                  placeholder="0"
                   onChange={(e) => onChange(index, { ...item, amount: e.target.value })}
                   onBlur={(e) => handleMathBlur('amount', e.target.value)}
-                  className="w-20 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  className="w-20 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
                 />
               </div>
             </div>
@@ -138,10 +155,11 @@ export const CustomCostRow: React.FC<{
               <span className="text-[10px] font-bold text-ink-faint uppercase">Per:</span>
               <input
                 type="text"
-                value={item.perUnits || '0'}
+                value={costFieldText(item.perUnits)}
+                placeholder="0"
                 onChange={(e) => onChange(index, { ...item, perUnits: e.target.value })}
                 onBlur={(e) => handleMathBlur('perUnits', e.target.value)}
-                className="w-16 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-16 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
               <span className="text-[10px] text-ink-soft">{unitLabel}s</span>
             </div>
@@ -152,7 +170,7 @@ export const CustomCostRow: React.FC<{
                 value={item.unit || ''}
                 onChange={(e) => onChange(index, { ...item, unit: e.target.value })}
                 placeholder={unitPlaceholder}
-                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               />
             </div>
           </>

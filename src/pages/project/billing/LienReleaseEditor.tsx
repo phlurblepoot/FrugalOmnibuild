@@ -395,7 +395,7 @@ export const LienReleaseEditor: React.FC<{
         <Field label="Amount"
           htmlFor="lr-amount"
           hint={source ? `${source.label}: billed ${formatMoney(source.totalCents)}, paid ${formatMoney(source.paidCents)}, balance ${formatMoney(source.balanceCents)}${source.contractSumToDateCents !== undefined ? `, contract sum to date ${formatMoney(source.contractSumToDateCents)}` : ''}` : undefined}>
-          <NumberInput id="lr-amount" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
+          <NumberInput allowEmpty id="lr-amount" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
         </Field>
       </div>
 

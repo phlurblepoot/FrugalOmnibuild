@@ -29,6 +29,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.1',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: the Advanced Costing boxes on a takeoff (Cost, Yield, Cost per, Amount and Per) no longer put a 0 back when you clear them. An empty box shows a faded 0 that goes away as you type, and it still counts as 0.',
+      'Fix: a 0 saved in Wall Heights now reopens as an empty box instead of a 0 that your typing lands next to.',
+      'Change: clearing an invoice or change order quantity or unit price, a lien release amount, or a daily report man count now counts as 0, instead of putting the old number back.',
+    ],
+  },
+  {
     version: '4.6.0',
     date: 'October 18, 2026',
     changes: [

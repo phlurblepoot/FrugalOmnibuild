@@ -179,7 +179,7 @@ export function TakeoffEditModal({
               <div className="flex justify-between items-center mb-2">
                 <h4 className="text-xs font-bold text-ink-soft uppercase tracking-wider">Custom Cost Items</h4>
                 <button
-                  onClick={() => setEditTakeoffCustomCosts([...editTakeoffCustomCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: 0 }])}
+                  onClick={() => setEditTakeoffCustomCosts([...editTakeoffCustomCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: '' }])}
                   className="text-accent-600 hover:text-accent-700 p-1 rounded-full hover:bg-accent-50 transition-colors"
                   title="Add Cost Item"
                 >
