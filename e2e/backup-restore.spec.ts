@@ -58,7 +58,8 @@ test('Backup tab: back up now, snapshot appears, downloaded zip carries the seed
   expect(names.some(n => n.endsWith('/manifest.json'))).toBe(true);
   expect(names.filter(n => n.startsWith('objects/')).length).toBeGreaterThan(0);
   expect(manifest).not.toBeNull();
-  expect(manifest.appVersion).toMatch(/^\d+\.\d+\.\d+$/);
+  // The app version, e.g. 4.6.9 or (point releases between minor versions) 4.6.9.3.
+  expect(manifest.appVersion).toMatch(/^\d+\.\d+\.\d+(\.\d+)?$/);
   const entry = manifest.files.find((f: { id: string }) => f.id === fileId);
   expect(entry, `manifest should list the uploaded document ${fileId}`).toBeTruthy();
   // …and the object it points at is actually in the archive.

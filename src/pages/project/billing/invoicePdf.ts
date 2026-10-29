@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import { drawPhotoGrid, type PdfPhoto } from '../../../utils/pdfPhotos';
 import { Invoice } from '../../../utils/store';
 import { formatMoney } from '../../../utils/money';
 import { formatBillingDate } from '../../../utils/billingDates';
@@ -50,7 +51,7 @@ export interface InvoicePdfContext {
   letterhead: LetterheadContext;
   /** pre-fetched (caller resolves each fileId → dataURL) — appended as pages
    *  after the totals/PAID stamp, same layout as change orders' photo section. */
-  photoDataUrls?: string[];
+  photos?: PdfPhoto[];
   /** When provided and non-empty, overrides the company email shown in the document header. */
   headerEmail?: string;
 }
@@ -145,20 +146,12 @@ export function buildInvoicePdf(ctx: InvoicePdfContext): Uint8Array {
 
   // Photos appended as pages (fresh page after the totals/PAID stamp) — same
   // layout as change orders' photo section (changeOrderPdf.ts).
-  const photoDataUrls = ctx.photoDataUrls ?? [];
-  if (photoDataUrls.length) {
+  const photos = ctx.photos ?? [];
+  if (photos.length) {
     newPage();
     doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(60, 60, 60);
     doc.text('Photos', M, y); y += 14;
-    const cellW = (W - 2 * M - 12) / 2, cellH = 150;
-    let col = 0;
-    for (const url of photoDataUrls) {
-      if (y + cellH > bottom) { newPage(); col = 0; }
-      const x = M + col * (cellW + 12);
-      try { doc.addImage(url, 'JPEG', x, y, cellW, cellH, undefined, 'FAST'); } catch { /* skip bad image */ }
-      col++;
-      if (col === 2) { col = 0; y += cellH + 12; }
-    }
+    y = drawPhotoGrid(doc, photos, { left: M, width: W - 2 * M, y, bottom, newPage: () => { newPage(); return y; } });
   }
 
   return doc.output('arraybuffer') as unknown as Uint8Array;

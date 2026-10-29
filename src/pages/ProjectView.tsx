@@ -22,6 +22,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import { NewTakeoffModal } from '../components/NewTakeoffModal';
+import { costLineForEditing } from '../components/CustomCostRow';
 import { UploadFailuresModal, UploadFailure } from '../components/UploadFailuresModal';
 import { StickyNote, ListChecks } from 'lucide-react';
 import { useNotes } from '../context/NotesContext';
@@ -561,7 +562,7 @@ export const ProjectView: React.FC = () => {
     setEditTakeoffUnit(rawTakeoff.unit || '');
     setEditTakeoffCostPerUnit(rawTakeoff.costPerUnit ?? '');
     setIsEditTakeoffAdvanced(rawTakeoff.isAdvancedCost || false);
-    setEditTakeoffCustomCosts(rawTakeoff.customCosts || []);
+    setEditTakeoffCustomCosts(rawTakeoff.customCosts?.map(costLineForEditing) || []);
     setEditTakeoffPricePackage(rawTakeoff.pricePackage || '');
   };
 

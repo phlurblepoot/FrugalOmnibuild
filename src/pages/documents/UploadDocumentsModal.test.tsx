@@ -7,7 +7,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { UploadDocumentsModal } from './UploadDocumentsModal';
+import { UploadDocumentsModal, guessKind } from './UploadDocumentsModal';
 import { ToastProvider } from '../../components/Toast';
 
 const saveBinaryFile = vi.hoisted(() => vi.fn());
@@ -16,8 +16,9 @@ vi.mock('../../utils/store', async (importOriginal) => {
   return { ...actual, saveBinaryFile };
 });
 
-// A .png so a MIME-based guess ('photo') would differ from the shared default.
+// A .png so its guessed type ('photo') differs from the 'document' default.
 const png = (name = 'shot.png') => new File([new Uint8Array([1])], name, { type: 'image/png' });
+const pdf = (name = 'plan.pdf') => new File([new Uint8Array([1])], name, { type: 'application/pdf' });
 
 const project = { id: 'proj1', name: 'Test Project', customerId: 'cust1' } as any;
 const customer = { id: 'cust2', name: 'Test Customer' } as any;
@@ -42,22 +43,54 @@ beforeEach(() => {
 });
 
 describe('UploadDocumentsModal', () => {
-  it('uploads drag-dropped files as the shared Type the select shows, not a MIME guess', async () => {
+  it('opens dropped photos with the shared Type set to Photo, and uploads what the select shows', async () => {
+    renderModal([png('a.png'), png('b.png')]);
+    expect((screen.getByLabelText('Type') as HTMLSelectElement).value).toBe('photo');
+    expect(screen.getByLabelText('Set type per file')).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: /Upload \(2\)/ }));
+    await waitFor(() => expect(saveBinaryFile).toHaveBeenCalledTimes(2));
+    expect(saveBinaryFile.mock.calls.map(c => c[2].kind)).toEqual(['photo', 'photo']);
+  });
+
+  it('follows the shared Type when it changes', async () => {
     renderModal([png()]);
-    expect((screen.getByLabelText('Type') as HTMLSelectElement).value).toBe('document');
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'document' } });
 
     fireEvent.click(screen.getByRole('button', { name: /Upload \(1\)/ }));
     await waitFor(() => expect(saveBinaryFile).toHaveBeenCalledTimes(1));
     expect(saveBinaryFile.mock.calls[0][2]).toMatchObject({ kind: 'document' });
   });
 
-  it('follows the shared Type when it changes', async () => {
-    renderModal([png()]);
-    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'photo' } });
+  it('opens a mixed batch with per-file types guessed and the shared Type hidden', async () => {
+    renderModal([pdf('plan.pdf'), png('site.png')]);
+    expect(screen.getByLabelText('Set type per file')).toBeChecked();
+    expect(screen.queryByLabelText('Type')).not.toBeInTheDocument();
+    expect((screen.getByLabelText('Type for plan.pdf') as HTMLSelectElement).value).toBe('document');
+    expect((screen.getByLabelText('Type for site.png') as HTMLSelectElement).value).toBe('photo');
 
-    fireEvent.click(screen.getByRole('button', { name: /Upload \(1\)/ }));
-    await waitFor(() => expect(saveBinaryFile).toHaveBeenCalledTimes(1));
-    expect(saveBinaryFile.mock.calls[0][2]).toMatchObject({ kind: 'photo' });
+    fireEvent.click(screen.getByRole('button', { name: /Upload \(2\)/ }));
+    await waitFor(() => expect(saveBinaryFile).toHaveBeenCalledTimes(2));
+    const kindOf = (n: string) => saveBinaryFile.mock.calls.find(c => (c[1] as File).name === n)![2].kind;
+    expect(kindOf('plan.pdf')).toBe('document');
+    expect(kindOf('site.png')).toBe('photo');
+  });
+
+  it('turning per-file types off shows the shared Type again and applies it to every file', async () => {
+    renderModal([pdf('plan.pdf'), png('site.png')]);
+    fireEvent.click(screen.getByLabelText('Set type per file'));
+    expect(screen.queryByLabelText('Type for plan.pdf')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'other' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Upload \(2\)/ }));
+    await waitFor(() => expect(saveBinaryFile).toHaveBeenCalledTimes(2));
+    expect(saveBinaryFile.mock.calls.map(c => c[2].kind)).toEqual(['other', 'other']);
+  });
+
+  it('the per-file Type box takes a fixed width on wider screens instead of stretching across the row', () => {
+    renderModal([pdf('plan.pdf'), png('site.png')]);
+    const select = screen.getByLabelText('Type for plan.pdf');
+    expect(select.parentElement).toHaveClass('sm:w-40', 'sm:shrink-0');
   });
 
   it('drops the succeeded chips after a partial failure so a retry cannot duplicate them', async () => {
@@ -135,7 +168,7 @@ describe('UploadDocumentsModal', () => {
 
     const shared = saveBinaryFile.mock.calls.find(c => (c[1] as File).name === 'shared.png')!;
     const company = saveBinaryFile.mock.calls.find(c => (c[1] as File).name === 'company.png')!;
-    expect(shared[2]).toMatchObject({ kind: 'document', projectId: 'proj1', customerId: 'cust1' });
+    expect(shared[2]).toMatchObject({ kind: 'photo', projectId: 'proj1', customerId: 'cust1' });
     expect(company[2]).toMatchObject({ kind: 'company-document' });
     expect(company[2]).not.toHaveProperty('projectId');
     expect(company[2]).not.toHaveProperty('customerId');
@@ -196,12 +229,22 @@ describe('UploadDocumentsModal — remote items (mail attachments)', () => {
     expect(screen.getByRole('button', { name: 'Save 2 files' })).toBeInTheDocument();
   });
 
+  it('opens a PDF + photo with per-file types guessed and the shared Type hidden', async () => {
+    const onUploadRemote = renderRemote();
+    expect(screen.getByLabelText('Set type per file')).toBeChecked();
+    expect(screen.queryByLabelText('Type')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save 2 files' }));
+    await waitFor(() => expect(onUploadRemote).toHaveBeenCalledTimes(1));
+    expect(onUploadRemote.mock.calls[0][0].map((i: any) => i.kind)).toEqual(['document', 'photo']);
+  });
+
   it('removing a chip and confirming calls onUploadRemote with only the remaining item + chosen kind/project', async () => {
     const onUploadRemote = renderRemote();
     fireEvent.click(screen.getByLabelText('Remove invoice.pdf'));
     expect(screen.queryByText('invoice.pdf')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'photo' } });
+    fireEvent.change(screen.getByLabelText('Type for site.jpg'), { target: { value: 'photo' } });
     fireEvent.change(screen.getByLabelText('Project'), { target: { value: 'proj1' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Save 1 file' }));
@@ -243,6 +286,7 @@ describe('UploadDocumentsModal — remote items (mail attachments)', () => {
       );
     };
     render(<Wrapper />);
+    fireEvent.click(screen.getByLabelText('Set type per file')); // back to one shared Type
     fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'photo' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save 2 files' }));
 
@@ -253,10 +297,10 @@ describe('UploadDocumentsModal — remote items (mail attachments)', () => {
   });
 
   it('preserves a manually-overridden per-file kind through a partial-failure retry-narrowing re-seed', async () => {
-    // invoice.pdf's MIME-based guess is 'document' (kindFromMime), so
-    // overriding it to 'other' differs from what a fresh guess would produce —
-    // if the re-seed recomputed the guess instead of carrying the pick
-    // forward, this would revert to 'document'.
+    // invoice.pdf's guess is 'document' (guessKind), so overriding it to
+    // 'other' differs from what a fresh guess would produce — if the re-seed
+    // recomputed the guess instead of carrying the pick forward, this would
+    // revert to 'document'. The PDF + photo batch opens with per-file types on.
     const Wrapper: React.FC = () => {
       const [items, setItems] = React.useState(remoteItems);
       const onUploadRemote = vi.fn().mockImplementation(async () => {
@@ -279,7 +323,6 @@ describe('UploadDocumentsModal — remote items (mail attachments)', () => {
       );
     };
     render(<Wrapper />);
-    fireEvent.click(screen.getByLabelText('Set type per file'));
     fireEvent.change(screen.getByLabelText('Type for invoice.pdf'), { target: { value: 'other' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Save 2 files' }));
@@ -287,5 +330,17 @@ describe('UploadDocumentsModal — remote items (mail attachments)', () => {
     await waitFor(() => expect(screen.queryByText('site.jpg')).not.toBeInTheDocument());
     expect(screen.getByText('invoice.pdf')).toBeInTheDocument();
     expect((screen.getByLabelText('Type for invoice.pdf') as HTMLSelectElement).value).toBe('other');
+  });
+});
+
+describe('guessKind', () => {
+  it('recognises photos and spreadsheets by MIME type or extension; everything else is a document', () => {
+    expect(guessKind('site.jpg', 'image/jpeg')).toBe('photo');
+    expect(guessKind('IMG_0042.HEIC', 'application/octet-stream')).toBe('photo');
+    expect(guessKind('budget.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).toBe('spreadsheet');
+    expect(guessKind('takeoff.csv', 'application/octet-stream')).toBe('spreadsheet');
+    expect(guessKind('plans.pdf', 'application/pdf')).toBe('document');
+    expect(guessKind('notes.txt', 'text/plain')).toBe('document');
+    expect(guessKind('archive.zip', 'application/zip')).toBe('document');
   });
 });

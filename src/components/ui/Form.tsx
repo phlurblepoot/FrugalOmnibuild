@@ -3,10 +3,16 @@ import React from 'react';
 
 // Shared chrome for all text-like controls — forms stay flat (spec §5 rule 4).
 const CONTROL =
-  'w-full rounded-lg border border-edge bg-raised px-3 py-2 text-sm text-ink ' +
+  'rounded-lg border border-edge bg-raised px-3 py-2 text-sm text-ink ' +
   'placeholder:text-ink-faint transition-colors ' +
   'focus:border-accent-400 focus-visible:outline-none focus:ring-2 focus:ring-accent-500/25 ' +
   'disabled:opacity-50 disabled:cursor-not-allowed';
+
+// Controls are full width unless the caller sets its own (w-40, w-auto, …).
+// Tailwind v4 emits w-full after every other w-* rule, so with both on the
+// element the caller's width silently lost and the box stretched.
+export const controlClass = (className = ''): string =>
+  `${/(^|\s)w-/.test(className) ? '' : 'w-full '}${CONTROL} ${className}`;
 
 export const Field: React.FC<{
   label: string;
@@ -34,18 +40,18 @@ export const Field: React.FC<{
 );
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className = '', ...rest }, ref) => <input ref={ref} className={`${CONTROL} ${className}`} {...rest} />
+  ({ className = '', ...rest }, ref) => <input ref={ref} className={controlClass(className)} {...rest} />
 );
 Input.displayName = 'Input';
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  ({ className = '', ...rest }, ref) => <textarea ref={ref} className={`${CONTROL} ${className}`} {...rest} />
+  ({ className = '', ...rest }, ref) => <textarea ref={ref} className={controlClass(className)} {...rest} />
 );
 Textarea.displayName = 'Textarea';
 
 export const Select = React.forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(
   ({ className = '', children, ...rest }, ref) => (
-    <select ref={ref} className={`${CONTROL} ${className}`} {...rest}>
+    <select ref={ref} className={controlClass(className)} {...rest}>
       {children}
     </select>
   )

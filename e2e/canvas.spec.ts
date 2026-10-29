@@ -797,7 +797,8 @@ test.describe('CanvasView measurement multiplier', () => {
     await expect(row.getByTestId('measurement-value')).toHaveText('60.00 ft');
     await expect(row.getByTestId('measurement-multiplier-math')).toHaveText('30.00 ft × 2 = 60.00 ft');
     await expect(sidebar.getByTestId('takeoff-total')).toHaveText('60.00 ft');
-    await expect(authedPage.getByTestId('selection-info-total')).toHaveText('Measurement total30.00 ft × 2 = 60.00 ft · $300');
+    // The canvas shows a length in feet and inches; the sidebar keeps the takeoff's unit.
+    await expect(authedPage.getByTestId('selection-info-total')).toHaveText(`Measurement total30' - 0" × 2 = 60' - 0" · $300`);
     // Visual proof of the canvas label, sidebar row and selection bar.
     await authedPage.screenshot({ path: 'test-results/measurement-multiplier.png' });
 
@@ -872,5 +873,58 @@ test.describe('CanvasView measurement multiplier', () => {
     await expect(authedPage.getByText('These measurements have different multipliers', { exact: false })).toBeVisible();
     await expect(authedPage.getByTestId('btn-confirm-delete')).toHaveCount(0);
     await expect(authedPage.getByTestId('measurement-row')).toHaveCount(2);
+  });
+});
+
+// Quick measurements: the Measure tool draws lengths and areas with no
+// takeoff. Each drawing is its own measurement, listed under Quick
+// measurements, never counted in a takeoff's total, and saved for everyone.
+// "Move to takeoff" turns one into a priced measurement.
+test.describe('CanvasView quick measurements', () => {
+  test('measure two lines without a takeoff, keep the totals, then move one into a takeoff', async ({ authedPage, request }) => {
+    const { token } = await login(request);
+    const { projectId, pageId, takeoffName } = await seedProjectWithTakeoffMeasurement(request, token);
+    await gotoCanvas(authedPage, projectId, pageId);
+    const box = await surfaceBox(authedPage);
+    const quick = authedPage.getByTestId('quick-measurements');
+    const sidebar = authedPage.getByTestId('measurement-sidebar');
+    await expect(sidebar.getByTestId('takeoff-total')).toHaveText('30.00 ft');
+    await expect(quick.getByTestId('measurement-row')).toHaveCount(0);
+
+    // Measure works with no takeoff selected and starts on the Length tool.
+    await authedPage.getByTestId('tool-quick-measure').click();
+    const cy = box.height / 2 + 60;
+    await clickCanvas(authedPage, box, box.width / 2 - 150, cy);
+    await clickCanvas(authedPage, box, box.width / 2 - 50, cy);
+    await authedPage.keyboard.press('Enter');
+    await clickCanvas(authedPage, box, box.width / 2, cy);
+    await clickCanvas(authedPage, box, box.width / 2 + 100, cy + 60);
+    await clickCanvas(authedPage, box, box.width / 2 + 150, cy + 60);
+    await authedPage.keyboard.press('Enter');
+
+    // Two separate measurements (not one with two segments), in feet and inches.
+    const rows = quick.getByTestId('measurement-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first().getByTestId('measurement-value')).toHaveText(/^\d+' - [\d /]+"$|^[\d /]+"$/);
+    // The takeoff's total is untouched.
+    await expect(sidebar.getByTestId('takeoff-total')).toHaveText('30.00 ft');
+
+    // Saved: a reload keeps both, still unpriced.
+    await gotoCanvas(authedPage, projectId, pageId);
+    await expect(quick.getByTestId('measurement-row')).toHaveCount(2);
+    await expect(sidebar.getByTestId('takeoff-total')).toHaveText('30.00 ft');
+
+    // Hiding them is a per-device view switch; the list stays.
+    await quick.getByTestId('quick-visibility').click();
+    await expect(quick.getByTestId('quick-visibility')).toHaveAttribute('aria-pressed', 'true');
+    await expect(quick.getByTestId('measurement-row')).toHaveCount(2);
+    await quick.getByTestId('quick-visibility').click();
+
+    // Move the first into the priced takeoff: it leaves the quick list and
+    // its length joins the takeoff's total.
+    await rows.first().click();
+    await quick.getByTestId('move-to-takeoff').selectOption({ label: takeoffName });
+    await expect(quick.getByTestId('measurement-row')).toHaveCount(1);
+    await expect(sidebar.getByTestId('takeoff-total')).not.toHaveText('30.00 ft');
   });
 });

@@ -6,8 +6,8 @@ import useImage from 'use-image';
 import { v4 as uuidv4 } from 'uuid';
 import type Konva from 'konva';
 import { Point, Measurement, MeasurementSegment, Tool, ScaleConfig, MeasurementTakeoff, ScaleRegion } from '../types';
-import { calculateDistance, calculatePolylineLength, measurementAreaPx, measurementRings, formatMeasurement, generateArcPoints, expandArcPoints, calculateSurfaceAreaPx, isPointInPolygon, calculateRealValue, convertUnit, formatRealValue, UNIT_LABELS } from '../utils/math';
-import { segmentPixelQuantity, describeQuantity, segmentLabelText, labelAnchor, placeSegmentLabel, LABEL_FONT_SIZE, LABEL_PADDING } from '../utils/segmentValue';
+import { calculateDistance, calculatePolylineLength, measurementAreaPx, measurementRings, formatMeasurement, formatCanvasMeasurement, generateArcPoints, expandArcPoints, calculateSurfaceAreaPx, isPointInPolygon, calculateRealValue, convertUnit, formatRealValue, UNIT_LABELS } from '../utils/math';
+import { segmentPixelQuantity, describeQuantity, segmentLabelText, labelAnchor, labelAngle, placeSegmentLabel, LABEL_FONT_SIZE, LABEL_PADDING, LABEL_NUDGE_UP } from '../utils/segmentValue';
 import { measurementMultiplier, formatMultiplied } from '../utils/multiplier';
 import type { TakeoffTotals } from '../pages/project/proposal/proposalGenerator';
 import { createWorker } from 'tesseract.js';
@@ -42,6 +42,10 @@ const bitmapRenderScaleByKey = new Map<string, number>();
 // lerped position with a stale prop value.
 // ─────────────────────────────────────────────────────────────────────────
 
+// Line labels, in screen px: the gap between a line and its label, and the
+// width of the box a line's total label is centred in (wider than any label).
+const LINE_LABEL_GAP = 3;
+const LINE_LABEL_BOX = 1200;
 const CURSOR_IDLE_MS = 30_000;
 const CURSOR_IDLE_OPACITY = 0.3;
 const NAME_TAG_PAD_X = 8;
@@ -193,6 +197,9 @@ interface PdfCanvasProps {
   selectedSegmentIdx?: number | null;
   onSelectMeasurement: (id: string | null) => void;
   onSelectSegment?: (id: string, segIdx: number) => void;
+  /** Quick-measure mode: every line or area drawn is a measurement of its own
+   *  (never a segment appended to the selected one). Cutouts still attach. */
+  quickMeasure?: boolean;
   onCancel?: () => void;
   isMultiRegion?: boolean;
   scaleRegions?: ScaleRegion[];
@@ -284,6 +291,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
   selectedSegmentIdx = null,
   onSelectMeasurement,
   onSelectSegment,
+  quickMeasure = false,
   onCancel,
   isMultiRegion = false,
   scaleRegions = [],
@@ -1318,7 +1326,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activePoints, currentTool, measurements, onAddMeasurement, arcMode, onCancel, resumeMeasurementId, activeArcMidIndices, selectedMeasurementId]);
+  }, [activePoints, currentTool, measurements, onAddMeasurement, arcMode, onCancel, resumeMeasurementId, activeArcMidIndices, selectedMeasurementId, quickMeasure]);
 
   const cancelDrawing = () => {
     setActivePoints([]);
@@ -1382,7 +1390,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
       const selected = selectedMeasurementId
         ? measurements.find(m => m.id === selectedMeasurementId)
         : null;
-      const canAppend = !!selected && selected.type === drawingType;
+      const canAppend = !!selected && selected.type === drawingType && (isSubtract || !quickMeasure);
 
       if (isSubtract) {
         // Cutouts attach to the selected area measurement or nowhere. The
@@ -1617,17 +1625,34 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
           sum + calculateSurfaceAreaPx(pts, m.heights || [], m.isTwoSided || false, currentScale), 0);
         const pxLen = allSegDisplayPoints.reduce((sum, pts) => sum + calculatePolylineLength(pts), 0);
         const areaText = formatMultiplied(pxArea, multiplier, v => formatMeasurement(v, 'area', currentScale, takeoff));
-        const lenText = formatMeasurement(pxLen, 'length', currentScale, takeoff);
+        const lenText = formatCanvasMeasurement(pxLen, 'length', currentScale, takeoff);
         text = `${areaText}\nLength: ${lenText}`;
       } else if (m.type === 'length') {
         const pxLen = allSegDisplayPoints.reduce((sum, pts) => sum + calculatePolylineLength(pts), 0);
-        text = formatMultiplied(pxLen, multiplier, v => formatMeasurement(v, 'length', currentScale, takeoff));
+        text = formatMultiplied(pxLen, multiplier, v => formatCanvasMeasurement(v, 'length', currentScale, takeoff));
       } else {
         // `points` (not displayPoints) — the helper expands arcs itself, and
         // this keeps the label live while a vertex is being dragged.
         const pxArea = measurementAreaPx({ points, arcMidIndices: m.arcMidIndices, segments: m.segments });
         text = formatMultiplied(pxArea, multiplier, v => formatMeasurement(v, 'area', currentScale, takeoff));
       }
+
+      // A line's label runs along it (rotated by labelAngle), centred just above
+      // the line: a wide box with centred text, so no measuring is needed.
+      // Other labels sit level, starting at their anchor.
+      const totalLabelPlacement = m.type === 'length'
+        ? {
+            width: LINE_LABEL_BOX / stageScale,
+            x: -LINE_LABEL_BOX / 2 / stageScale,
+            y: -(text.split('\n').length * LABEL_FONT_SIZE + 2 * LABEL_PADDING + LINE_LABEL_GAP) / stageScale,
+            wrap: 'none' as const,
+          }
+        : { offsetY: LABEL_NUDGE_UP / stageScale };
+
+      // A quick measurement (no takeoff, never priced) draws dash-dot, like a
+      // dimension line, so it never reads as part of a takeoff. The gaps are
+      // wide because the round line caps eat half a stroke width from each side.
+      const quickDash = [18 / stageScale, 11 / stageScale, 2 / stageScale, 11 / stageScale];
 
       const isSelected = selectedMeasurementId === m.id;
       // null = whole measurement selected (highlight all segments)
@@ -1646,25 +1671,43 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
       const selectedSeg = !isSelected || selectedSegmentIdx === null || m.type === 'count' || !m.segments?.length ? undefined
         : selectedSegmentIdx === -1 ? { points, arcMidIndices: m.arcMidIndices }
         : adjustedSegments[selectedSegmentIdx];
-      let segmentLabel: { text: string; x: number; y: number } | null = null;
+      // A line's segment label runs along its segment, centred on it: below the
+      // line on the primary segment (whose total label sits above), above it
+      // otherwise. Other shapes keep a level label beside the total.
+      let segmentLabel: { text: string; x: number; y: number; rotation?: number; below?: boolean } | null = null;
       if (selectedSeg && selectedSeg.points.length > 0) {
         const segText = segmentLabelText(describeQuantity(
           segmentPixelQuantity(m, selectedSeg, takeoff?.type, currentScale),
           { scale: currentScale, takeoff, totals: takeoffCostTotals?.find(t => t.id === m.takeoffId), pageUnit: scaleConfig?.unit, multiplier },
         ));
-        const pos = placeSegmentLabel({
-          segmentAnchor: labelAnchor(m.type, expandArcPoints(selectedSeg.points, selectedSeg.arcMidIndices)),
-          segmentText: segText,
-          totalAnchor: { x: centerX, y: centerY },
-          totalText: text,
-          isPrimary: selectedSegmentIdx === -1,
-          stageScale,
-        });
-        segmentLabel = { text: segText, ...pos };
+        const segPoints = expandArcPoints(selectedSeg.points, selectedSeg.arcMidIndices);
+        if (m.type === 'length') {
+          segmentLabel = { text: segText, ...labelAnchor(m.type, segPoints), rotation: labelAngle(m.type, segPoints), below: selectedSegmentIdx === -1 };
+        } else {
+          const pos = placeSegmentLabel({
+            segmentAnchor: labelAnchor(m.type, segPoints),
+            segmentText: segText,
+            totalAnchor: { x: centerX, y: centerY },
+            totalText: text,
+            isPrimary: selectedSegmentIdx === -1,
+            stageScale,
+          });
+          segmentLabel = { text: segText, ...pos };
+        }
       }
       // Selection-highlight amber behind dark text, scaled like the total label.
+      const segLabelHeight = segmentLabel ? (segmentLabel.text.split('\n').length * LABEL_FONT_SIZE + 2 * LABEL_PADDING) / stageScale : 0;
       const renderSegmentLabel = () => segmentLabel && (
-        <Label x={segmentLabel.x} y={segmentLabel.y} listening={false} name="segment-value-label">
+        <Label
+          x={segmentLabel.x}
+          y={segmentLabel.y}
+          rotation={segmentLabel.rotation ?? 0}
+          offsetY={segmentLabel.rotation === undefined ? 0 : segmentLabel.below ? -LINE_LABEL_GAP / stageScale : segLabelHeight + LINE_LABEL_GAP / stageScale}
+          // Centred on its anchor along the line, once Konva knows its width.
+          ref={segmentLabel.rotation === undefined ? undefined : (node: Konva.Label | null) => { node?.offsetX(node.getText().width() / 2); }}
+          listening={false}
+          name="segment-value-label"
+        >
           <Tag
             fill="#fbbf24"
             stroke="#b45309"
@@ -1912,6 +1955,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                 lineCap="round"
                 closed={m.type === 'area'}
                 fill={m.type === 'area' && !hasHoles ? `${isMultiSelected ? '#f59e0b' : m.color}${isPrimarySelected ? '60' : isMultiSelected ? '50' : '40'}` : undefined}
+                dash={m.takeoffId ? undefined : quickDash}
                 shadowColor={isMultiSelected ? '#f59e0b' : isPrimarySelected ? '#fbbf24' : undefined}
                 shadowBlur={isMultiSelected ? 14 / stageScale : isPrimarySelected ? 18 / stageScale : 0}
                 shadowOpacity={isMultiSelected ? 0.7 : isPrimarySelected ? 0.85 : 0}
@@ -1969,22 +2013,22 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
               {/* Text label is anchored to the primary segment so it tracks
                   the segment's drag transform. */}
               {text && (
-                <Group x={centerX} y={centerY} listening={false}>
+                <Group x={centerX} y={centerY} rotation={labelAngle(m.type, displayPoints)} listening={false}>
                   <Text
                     text={text}
-                    fontSize={14 / stageScale}
+                    fontSize={LABEL_FONT_SIZE / stageScale}
                     fill="#fff"
-                    padding={4 / stageScale}
+                    padding={LABEL_PADDING / stageScale}
                     align="center"
-                    offsetY={10 / stageScale}
+                    {...totalLabelPlacement}
                   />
                   <Text
                     text={text}
-                    fontSize={14 / stageScale}
+                    fontSize={LABEL_FONT_SIZE / stageScale}
                     fill="#000"
-                    padding={4 / stageScale}
+                    padding={LABEL_PADDING / stageScale}
                     align="center"
-                    offsetY={10 / stageScale}
+                    {...totalLabelPlacement}
                     stroke="#fff"
                     strokeWidth={2 / stageScale}
                     fillAfterStrokeEnabled
@@ -2048,7 +2092,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                   lineCap="round"
                   closed={m.type === 'area'}
                   fill={m.type === 'area' && !hasHoles ? `${m.color}${isSegmentSelected(segIdx) ? '60' : '40'}` : undefined}
-                  dash={seg.subtract ? [10 / stageScale, 7 / stageScale] : undefined}
+                  dash={seg.subtract ? [10 / stageScale, 7 / stageScale] : m.takeoffId ? undefined : quickDash}
                   shadowColor={isSegmentSelected(segIdx) ? '#fbbf24' : undefined}
                   shadowBlur={isSegmentSelected(segIdx) ? 18 / stageScale : 0}
                   shadowOpacity={isSegmentSelected(segIdx) ? 0.85 : 0}

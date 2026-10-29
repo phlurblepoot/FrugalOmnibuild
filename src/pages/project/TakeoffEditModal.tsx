@@ -68,7 +68,7 @@ export function TakeoffEditModal({
               type="text"
               value={editTakeoffName}
               onChange={(e) => setEditTakeoffName(e.target.value)}
-              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500"
+              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               placeholder="e.g. Hardwood Flooring"
               autoFocus
             />
@@ -82,7 +82,7 @@ export function TakeoffEditModal({
               list="price-package-options-edit"
               value={editTakeoffPricePackage}
               onChange={(e) => setEditTakeoffPricePackage(e.target.value)}
-              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500"
+              className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint"
               placeholder="e.g. Flooring Package"
             />
             <datalist id="price-package-options-edit">
@@ -99,7 +99,7 @@ export function TakeoffEditModal({
                 type="text"
                 value={editingTakeoff.type}
                 disabled
-                className="w-full border border-edge rounded-xl px-4 py-2.5 bg-sunken text-ink-soft capitalize"
+                className="w-full border border-edge rounded-xl px-4 py-2.5 bg-raised text-ink-soft capitalize opacity-70"
               />
             </div>
             <div>
@@ -154,7 +154,7 @@ export function TakeoffEditModal({
                 disabled={isEditTakeoffAdvanced}
                 value={isEditTakeoffAdvanced ? '' : editTakeoffCostPerUnit}
                 onChange={(e) => setEditTakeoffCostPerUnit(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 disabled:bg-sunken disabled:text-ink-faint"
+                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint disabled:opacity-60 disabled:text-ink-faint"
                 placeholder={isEditTakeoffAdvanced ? "Disabled in Advanced" : "0.00"}
               />
             </div>
@@ -179,7 +179,7 @@ export function TakeoffEditModal({
               <div className="flex justify-between items-center mb-2">
                 <h4 className="text-xs font-bold text-ink-soft uppercase tracking-wider">Custom Cost Items</h4>
                 <button
-                  onClick={() => setEditTakeoffCustomCosts([...editTakeoffCustomCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: 0 }])}
+                  onClick={() => setEditTakeoffCustomCosts([...editTakeoffCustomCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: '' }])}
                   className="text-accent-600 hover:text-accent-700 p-1 rounded-full hover:bg-accent-50 transition-colors"
                   title="Add Cost Item"
                 >

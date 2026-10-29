@@ -43,7 +43,7 @@ const EditModal: React.FC<{
       <div className="bg-raised rounded-xl shadow-2xl p-6 w-96 max-w-[90vw]">
         <h3 className="text-lg font-semibold mb-4 text-ink">{title}</h3>
         <textarea
-          className="w-full h-32 p-3 border border-edge rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent outline-none resize-none mb-4"
+          className="w-full h-32 p-3 border border-edge rounded-lg bg-raised text-ink focus:ring-2 focus:ring-accent-500 focus:border-transparent outline-none resize-none mb-4"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           autoFocus
@@ -474,6 +474,7 @@ const NoteTable: React.FC<{ element: NoteElement; isSelected: boolean; onSelect:
     input.style.zIndex = '10000';
     input.style.textAlign = 'center';
     input.style.background = 'white';
+    input.style.color = '#000';
 
     input.focus();
     input.select();
@@ -1525,8 +1526,9 @@ export const NotesBoard: React.FC<NotesBoardProps> = ({ projectId, initialNote, 
         </button>
       </div>
 
-      {/* Canvas Area */}
-      <div className="flex-1 relative bg-raised" ref={containerRef}>
+      {/* Canvas Area: white like paper in both themes, so the black default
+          text and saved colours read the same for everyone. */}
+      <div className="flex-1 relative bg-white" ref={containerRef}>
         <input 
           type="file" 
           ref={fileInputRef} 

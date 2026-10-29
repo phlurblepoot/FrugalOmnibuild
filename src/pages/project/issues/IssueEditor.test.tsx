@@ -182,7 +182,7 @@ describe('IssueEditor — document actions', () => {
     await waitFor(() => expect(h.buildIssuePdf).toHaveBeenCalledTimes(1));
     // Not the prop and not the local draft — the saved record, photos and all.
     expect(h.buildIssuePdf.mock.calls[0][0].issue).toBe(SAVED);
-    expect(h.buildIssuePdf.mock.calls[0][0].photoDataUrls).toHaveLength(1);
+    expect(h.buildIssuePdf.mock.calls[0][0].photos).toHaveLength(1);
 
     await waitFor(() => expect(h.persistGeneratedDocument).toHaveBeenCalledTimes(1));
     expect(h.persistGeneratedDocument.mock.calls[0][1]).toMatchObject({

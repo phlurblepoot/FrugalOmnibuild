@@ -137,7 +137,7 @@ export const AddPagesModal: React.FC<AddPagesModalProps> = ({
                   <select
                     value={targetPlanSetId}
                     onChange={(e) => setTargetPlanSetId(e.target.value)}
-                    className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-white"
+                    className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
                     required
                   >
                     {project.planSets?.map(ps => (

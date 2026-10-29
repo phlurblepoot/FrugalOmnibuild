@@ -27,6 +27,8 @@ import { Login } from './pages/Login';
 import { RestorePage } from './pages/RestorePage';
 import { Settings } from './pages/Settings';
 import { DocumentEditor } from './pages/DocumentEditor';
+// Loaded on demand: the sketch editor brings three.js and a 23 MB CAD engine.
+const SketchPage = React.lazy(() => import('./pages/sketch/SketchPage'));
 import { TasksPage } from './pages/TasksPage';
 import { TimeKeeping } from './pages/TimeKeeping';
 import { CustomersSplitView } from './pages/customers/CustomersSplitView';
@@ -48,6 +50,7 @@ import { AppShell } from './components/shell/AppShell';
 import ProjectConflictListener from './components/ProjectConflictListener';
 import { getSettings } from './utils/store';
 import { isBareRoute } from './utils/locationInfo';
+import { WhatsNewProvider } from './whatsNew/WhatsNewProvider';
 
 const Layout: React.FC<{ appName: string; logoUrl: string }> = ({ appName, logoUrl }) => {
   const location = useLocation();
@@ -62,16 +65,18 @@ const Layout: React.FC<{ appName: string; logoUrl: string }> = ({ appName, logoU
           <CollaborationProvider>
             <NotificationsProvider>
               <NotesProvider>
-                {!isBare && <CommandPalette />}
-                <AppShell appName={appName}>
-                  <FollowPill />
-                  <ThemeWipe />
-                  <CelebrationOverlay />
-                  <NotesOverlay />
-                  <PageTransition>
-                    <Outlet context={{ appName, logoUrl }} />
-                  </PageTransition>
-                </AppShell>
+                <WhatsNewProvider>
+                  {!isBare && <CommandPalette />}
+                  <AppShell appName={appName}>
+                    <FollowPill />
+                    <ThemeWipe />
+                    <CelebrationOverlay />
+                    <NotesOverlay />
+                    <PageTransition>
+                      <Outlet context={{ appName, logoUrl }} />
+                    </PageTransition>
+                  </AppShell>
+                </WhatsNewProvider>
               </NotesProvider>
             </NotificationsProvider>
           </CollaborationProvider>
@@ -166,6 +171,14 @@ const router = createBrowserRouter([
         {
           path: 'tools/edit',
           element: <DocumentEditor />,
+        },
+        {
+          path: 'tools/sketch',
+          element: (
+            <React.Suspense fallback={<div className="p-8 text-sm text-ink-soft">Opening Sketch…</div>}>
+              <SketchPage />
+            </React.Suspense>
+          ),
         },
         {
           // A mail attachment in the ONLYOFFICE viewer (Phase 6).

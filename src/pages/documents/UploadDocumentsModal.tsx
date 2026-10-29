@@ -16,7 +16,7 @@ import { useToast } from '../../components/Toast';
 import { Button, Checkbox, Field, Modal, Select } from '../../components/ui';
 import { DIRECT_UPLOAD_KINDS, kindLabel } from './docTypes';
 import { reportConversions } from '../../utils/uploadConversion';
-import { kindFromMime } from './openTarget';
+import { SHEET_MIMES } from './openTarget';
 
 /** A remote (mail-attachment) source item, before it becomes an Entry. */
 export interface RemoteItem {
@@ -47,13 +47,69 @@ const isRemoteEntry = (e: Entry): e is Extract<Entry, { remote: RemoteItem }> =>
 const entryName = (e: Entry): string => (isRemoteEntry(e) ? e.remote.name : e.file.name);
 const entrySize = (e: Entry): number => (isRemoteEntry(e) ? e.remote.size : e.file.size);
 
-// The Type select opens on this, so a fresh batch must be seeded with it —
-// guessing from the MIME type instead would make the visible Type lie about
-// what gets uploaded.
 const DEFAULT_KIND = 'document';
+
+// A file's likely type from its MIME type, or its extension when the MIME type
+// is generic (mail attachments often arrive as application/octet-stream):
+// photos and spreadsheets are recognised, everything else is a document.
+export const guessKind = (name: string, mime: string): string => {
+  const ext = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'tif', 'tiff'].includes(ext)) return 'photo';
+  if (SHEET_MIMES.includes(mime) || mime === 'application/vnd.oasis.opendocument.spreadsheet' || mime === 'text/csv'
+    || ['xlsx', 'xlsm', 'xls', 'ods', 'csv', 'numbers'].includes(ext)) return 'spreadsheet';
+  return 'document';
+};
+const entryGuess = (e: Entry): string => (isRemoteEntry(e) ? guessKind(e.remote.name, e.remote.mime) : guessKind(e.file.name, e.file.type));
+
+// Until the person picks a type themselves, the batch carries each file's
+// guess: one shared Type when every guess agrees, else per-file types (so
+// the Type select never shows something other than what gets uploaded).
+const seedFromGuesses = (entries: Entry[]): { entries: Entry[]; perFile: boolean; shared: string } => {
+  const guesses = entries.map(entryGuess);
+  const shared = guesses[0] ?? DEFAULT_KIND;
+  if (guesses.every(g => g === shared)) return { entries: entries.map(e => ({ ...e, kind: shared })), perFile: false, shared };
+  return { entries: entries.map((e, i) => ({ ...e, kind: guesses[i] })), perFile: true, shared: DEFAULT_KIND };
+};
 
 const toEntry = (file: File, kind: string): Entry => ({ id: uuidv4(), file, kind });
 const toRemoteEntry = (remote: RemoteItem, kind: string): Entry => ({ id: uuidv4(), remote, kind });
+
+// One file in the batch. With per-file types on, its Type select sits at the
+// right of the row on wider screens and drops onto its own line on a phone.
+// The wrapper, not the Select, sets the width, and stops clicks from reaching
+// the local dropzone underneath (which would open the file browser).
+const FileRow: React.FC<{
+  entry: Entry;
+  typeOptions: { id: string; label: string }[];
+  perFileType: boolean;
+  onKind: (kind: string) => void;
+  onRemove: () => void;
+}> = ({ entry, typeOptions, perFileType, onKind, onRemove }) => {
+  const name = entryName(entry);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-edge bg-raised px-3 py-2">
+      <FileIcon size={16} className="shrink-0 text-ink-faint" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm text-ink" title={name}>{name}</p>
+        <p className="truncate text-xs text-ink-faint">{formatBytes(entrySize(entry))}</p>
+      </div>
+      {perFileType && (
+        <div className="order-last w-full pl-6 sm:order-none sm:w-40 sm:shrink-0 sm:pl-0" onClick={ev => ev.stopPropagation()}>
+          <Select aria-label={`Type for ${name}`} value={entry.kind} onChange={ev => onKind(ev.target.value)}>
+            {typeOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </Select>
+        </div>
+      )}
+      <button
+        onClick={ev => { ev.stopPropagation(); onRemove(); }}
+        aria-label={`Remove ${name}`}
+        className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:bg-hover hover:text-ink"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+};
 
 export const UploadDocumentsModal: React.FC<{
   open: boolean;
@@ -84,6 +140,9 @@ export const UploadDocumentsModal: React.FC<{
   const [entries, setEntries] = useState<Entry[]>([]);
   const [sharedKind, setSharedKind] = useState(DEFAULT_KIND);
   const [perFileType, setPerFileType] = useState(false);
+  // Set once the person picks a type (shared, per file, or the checkbox);
+  // until then the batch follows each file's guess.
+  const [kindTouched, setKindTouched] = useState(false);
   const [projectId, setProjectId] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -96,13 +155,13 @@ export const UploadDocumentsModal: React.FC<{
   // dropzone's own onDrop).
   useEffect(() => {
     if (!open) return;
-    if (remoteItems) {
-      setEntries(remoteItems.map(r => toRemoteEntry(r, DEFAULT_KIND)));
-    } else {
-      setEntries((initialFiles ?? []).map(f => toEntry(f, DEFAULT_KIND)));
-    }
-    setSharedKind(DEFAULT_KIND);
-    setPerFileType(false);
+    const seed = seedFromGuesses(remoteItems
+      ? remoteItems.map(r => toRemoteEntry(r, DEFAULT_KIND))
+      : (initialFiles ?? []).map(f => toEntry(f, DEFAULT_KIND)));
+    setEntries(seed.entries);
+    setSharedKind(seed.shared);
+    setPerFileType(seed.perFile);
+    setKindTouched(false);
     const proj = initialProjectId ? projects.find(p => p.id === initialProjectId) : undefined;
     setProjectId(initialProjectId ?? '');
     setCustomerId(proj?.customerId ?? '');
@@ -123,7 +182,7 @@ export const UploadDocumentsModal: React.FC<{
     if (open && remoteItems && remoteItemsRef.current !== remoteItems) {
       setEntries(prev => remoteItems.map(r => {
         const existing = prev.find(e => isRemoteEntry(e) && e.remote.id === r.id);
-        const kind = existing ? existing.kind : (perFileType ? kindFromMime(r.mime) : sharedKind);
+        const kind = existing ? existing.kind : (perFileType ? guessKind(r.name, r.mime) : sharedKind);
         return toRemoteEntry(r, kind);
       }));
     }
@@ -139,12 +198,23 @@ export const UploadDocumentsModal: React.FC<{
   const addFiles = (list: FileList | File[]) => {
     const arr = Array.from(list);
     if (!arr.length) return;
-    // Only the per-file disclosure guesses from the MIME type — with one shared
-    // Type, every chip must carry what that select shows.
-    setEntries(prev => [...prev, ...arr.map(f => toEntry(f, perFileType ? kindFromMime(f.type) : sharedKind))]);
+    if (!kindTouched) {
+      // Nothing picked yet: the whole batch, new files included, follows the guesses.
+      const seed = seedFromGuesses([...entries, ...arr.map(f => toEntry(f, DEFAULT_KIND))]);
+      setEntries(seed.entries);
+      setSharedKind(seed.shared);
+      setPerFileType(seed.perFile);
+      return;
+    }
+    // With one shared Type, every chip must carry what that select shows.
+    setEntries(prev => [...prev, ...arr.map(f => toEntry(f, perFileType ? guessKind(f.name, f.type) : sharedKind))]);
   };
 
   const removeEntry = (id: string) => setEntries(prev => prev.filter(e => e.id !== id));
+  const setEntryKind = (id: string, kind: string) => {
+    setKindTouched(true);
+    setEntries(prev => prev.map(x => x.id === id ? { ...x, kind } : x));
+  };
 
   // Company documents aren't tied to a project (spec §Decisions): a project
   // pick from a prior batch would silently carry over otherwise.
@@ -153,6 +223,7 @@ export const UploadDocumentsModal: React.FC<{
     : sharedKind === 'company-document';
 
   const changeSharedKind = (kind: string) => {
+    setKindTouched(true);
     setSharedKind(kind);
     if (!perFileType) setEntries(prev => prev.map(e => ({ ...e, kind })));
   };
@@ -167,6 +238,7 @@ export const UploadDocumentsModal: React.FC<{
   }, [isCompanyDocOnly]);
 
   const togglePerFileType = (checked: boolean) => {
+    setKindTouched(true);
     setPerFileType(checked);
     if (!checked) setEntries(prev => prev.map(e => ({ ...e, kind: sharedKind })));
   };
@@ -267,30 +339,8 @@ export const UploadDocumentsModal: React.FC<{
         {remoteItems ? (
           <div className="space-y-2">
             {entries.map(e => (
-              <div key={e.id} className="flex items-center gap-2 rounded-lg border border-edge bg-raised px-3 py-2">
-                <FileIcon size={16} className="shrink-0 text-ink-faint" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">{entryName(e)}</p>
-                  <p className="text-xs text-ink-faint">{formatBytes(entrySize(e))}</p>
-                </div>
-                {perFileType && (
-                  <Select
-                    aria-label={`Type for ${entryName(e)}`}
-                    value={e.kind}
-                    onChange={ev => setEntries(prev => prev.map(x => x.id === e.id ? { ...x, kind: ev.target.value } : x))}
-                    className="w-40 shrink-0"
-                  >
-                    {typeOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                  </Select>
-                )}
-                <button
-                  onClick={() => removeEntry(e.id)}
-                  aria-label={`Remove ${entryName(e)}`}
-                  className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:bg-hover hover:text-ink"
-                >
-                  <X size={14} />
-                </button>
-              </div>
+              <FileRow key={e.id} entry={e} typeOptions={typeOptions} perFileType={perFileType}
+                onKind={kind => setEntryKind(e.id, kind)} onRemove={() => removeEntry(e.id)} />
             ))}
           </div>
         ) : (
@@ -324,31 +374,8 @@ export const UploadDocumentsModal: React.FC<{
             ) : (
               <div className="space-y-2">
                 {entries.map(e => (
-                  <div key={e.id} className="flex items-center gap-2 rounded-lg border border-edge bg-raised px-3 py-2">
-                    <FileIcon size={16} className="shrink-0 text-ink-faint" />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-ink">{entryName(e)}</p>
-                      <p className="text-xs text-ink-faint">{formatBytes(entrySize(e))}</p>
-                    </div>
-                    {perFileType && (
-                      <Select
-                        aria-label={`Type for ${entryName(e)}`}
-                        value={e.kind}
-                        onChange={ev => setEntries(prev => prev.map(x => x.id === e.id ? { ...x, kind: ev.target.value } : x))}
-                        className="w-40 shrink-0"
-                        onClick={ev => ev.stopPropagation()}
-                      >
-                        {typeOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-                      </Select>
-                    )}
-                    <button
-                      onClick={ev => { ev.stopPropagation(); removeEntry(e.id); }}
-                      aria-label={`Remove ${entryName(e)}`}
-                      className="shrink-0 rounded-md p-1 text-ink-faint transition-colors hover:bg-hover hover:text-ink"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
+                  <FileRow key={e.id} entry={e} typeOptions={typeOptions} perFileType={perFileType}
+                    onKind={kind => setEntryKind(e.id, kind)} onRemove={() => removeEntry(e.id)} />
                 ))}
                 <button
                   type="button"
@@ -363,12 +390,15 @@ export const UploadDocumentsModal: React.FC<{
         )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Type" htmlFor="upload-type">
-            <Select id="upload-type" value={sharedKind} onChange={e => changeSharedKind(e.target.value)}>
-              {typeOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-            </Select>
-          </Field>
-          <div className="flex items-end pb-2">
+          {/* With per-file types on, each row has its own Type, so the shared one is hidden. */}
+          {!perFileType && (
+            <Field label="Type" htmlFor="upload-type">
+              <Select id="upload-type" value={sharedKind} onChange={e => changeSharedKind(e.target.value)}>
+                {typeOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </Select>
+            </Field>
+          )}
+          <div className={`flex items-end pb-2 ${perFileType ? 'sm:col-span-2' : ''}`}>
             <Checkbox
               label="Set type per file"
               checked={perFileType}

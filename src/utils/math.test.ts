@@ -18,6 +18,7 @@ import {
   formatFeetAndInches,
   formatRealValue,
   formatMeasurement,
+  formatCanvasMeasurement,
   signedPolygonArea,
   measurementAreaPx,
   measurementRings,
@@ -334,6 +335,42 @@ describe('parsing & formatting', () => {
     });
     it('0.5 ft -> 6"', () => {
       expect(formatFeetAndInches(0.5)).toBe(`6"`);
+    });
+    it('to 1/32": rounds to the nearest thirty-second and reduces the fraction', () => {
+      expect(formatFeetAndInches(30 + 6.5 / 12, 32)).toBe(`30' - 6 1/2"`);
+      expect(formatFeetAndInches(1 + 3 / 32 / 12, 32)).toBe(`1' - 3/32"`);
+      expect(formatFeetAndInches(30, 32)).toBe(`30' - 0"`);
+      expect(formatFeetAndInches(8.25 / 12, 32)).toBe(`8 1/4"`);
+      // 0.0151" over 2' rounds down to 2' - 0"; 0.0157" rounds up to 1/32".
+      expect(formatFeetAndInches(2 + 0.0151 / 12, 32)).toBe(`2' - 0"`);
+      expect(formatFeetAndInches(2 + 0.0157 / 12, 32)).toBe(`2' - 1/32"`);
+      // 11 31.9/32" carries into the next foot.
+      expect(formatFeetAndInches(3 + 11.999 / 12, 32)).toBe(`4' - 0"`);
+    });
+  });
+
+  describe('formatCanvasMeasurement', () => {
+    // 10 px = 1 ft
+    const ft: ScaleConfig = { pixelDistance: 10, realWorldDistance: 1, unit: 'ft' };
+    const inch: ScaleConfig = { pixelDistance: 10, realWorldDistance: 12, unit: 'in' };
+    const m: ScaleConfig = { pixelDistance: 10, realWorldDistance: 1, unit: 'm' };
+    const takeoff = (unit?: string) => ({ id: 't', name: 'T', color: '#000', type: 'length', unit } as MeasurementTakeoff);
+
+    it('shows an imperial length in feet and inches to 1/32", whatever unit its takeoff totals in', () => {
+      expect(formatCanvasMeasurement(305.4167, 'length', ft)).toBe(`30' - 6 1/2"`);
+      expect(formatCanvasMeasurement(305.4167, 'length', ft, takeoff('in'))).toBe(`30' - 6 1/2"`);
+      expect(formatCanvasMeasurement(305.4167, 'length', ft, takeoff('ft'))).toBe(`30' - 6 1/2"`);
+      expect(formatCanvasMeasurement(305.4167, 'length', ft, takeoff('yd'))).toBe(`30' - 6 1/2"`);
+      expect(formatCanvasMeasurement(305.4167, 'length', inch, takeoff('in'))).toBe(`30' - 6 1/2"`);
+      // An area takeoff's unit words a surface area's run length.
+      expect(formatCanvasMeasurement(100, 'length', ft, takeoff('sqft'))).toBe(`10' - 0"`);
+    });
+
+    it('leaves metric lengths, areas and unscaled pages as they were', () => {
+      expect(formatCanvasMeasurement(100, 'length', ft, takeoff('m'))).toBe(formatMeasurement(100, 'length', ft, takeoff('m')));
+      expect(formatCanvasMeasurement(100, 'length', m)).toBe('10.00 m');
+      expect(formatCanvasMeasurement(1000, 'area', ft)).toBe('10.00 sq ft');
+      expect(formatCanvasMeasurement(100, 'length', null)).toBe('100.00 px');
     });
   });
 

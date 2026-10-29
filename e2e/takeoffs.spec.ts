@@ -116,6 +116,39 @@ test('advanced cost toggle persists', async ({ authedPage, apiToken, request }) 
   await expect(authedPage.getByTestId('toggle-advanced-cost')).toBeChecked();
 });
 
+test('advanced cost boxes never leave a stray 0', async ({ authedPage, apiToken, request }) => {
+  const { token } = apiToken;
+  const { projectId } = await seedProjectWithPage(request, token);
+
+  await gotoTakeoffsTab(authedPage, projectId);
+  await authedPage.getByTestId('btn-new-takeoff').click();
+  await authedPage.getByTestId('takeoff-name-input').fill('Plaster');
+  await authedPage.getByTestId('btn-create-takeoff').click();
+
+  await takeoffRows(authedPage).first().getByTestId('btn-edit-takeoff').click();
+  await authedPage.getByTestId('toggle-advanced-cost').check();
+  await authedPage.getByTitle('Add Cost Item').click();
+
+  // A new line's cost box is empty with a faded 0, so typing gives 5, not 05.
+  const cost = authedPage.getByPlaceholder('0', { exact: true });
+  await expect(cost).toHaveValue('');
+  await cost.pressSequentially('5');
+  await expect(cost).toHaveValue('5');
+
+  // Clearing it leaves it empty instead of putting a 0 back.
+  await cost.fill('');
+  await expect(cost).toHaveValue('');
+  await authedPage.getByTestId('btn-save-takeoff').click();
+  await expect(authedPage.getByTestId('edit-takeoff-name')).toHaveCount(0);
+
+  // The empty box saved as 0 and reopens empty, not as a real 0.
+  const saved = await request.get(`/api/projects/${projectId}`, { headers: { Authorization: `Bearer ${token}` } });
+  const project = await saved.json();
+  expect(project.takeoffs[0].customCosts[0].costPerUnit).toBe(0);
+  await takeoffRows(authedPage).first().getByTestId('btn-edit-takeoff').click();
+  await expect(authedPage.getByPlaceholder('0', { exact: true })).toHaveValue('');
+});
+
 test('delete a takeoff', async ({ authedPage, apiToken, request }) => {
   const { token } = apiToken;
   const { projectId } = await seedProjectWithPage(request, token);

@@ -22,6 +22,7 @@ import { buildDailyReportPdf, dailyReportFileName } from './dailyReportPdf';
 import { appendAttachedPdfs } from '../../../utils/pdfAttachments';
 import { hexToRgb, invertImageDataUrl } from '../../../utils/documentLetterhead';
 import { useDiscardGuard } from '../../../components/ui/useDiscardGuard';
+import { loadPdfPhoto, type PdfPhoto } from '../../../utils/pdfPhotos';
 
 export const DailyReportEditor: React.FC<{
   report: DailyReport;
@@ -176,17 +177,17 @@ export const DailyReportEditor: React.FC<{
     if (logoDataUrl && settings.invertLogoOnDocuments === 'true') {
       logoDataUrl = await invertImageDataUrl(logoDataUrl);
     }
-    // fetch each photo as a dataURL (authenticated content endpoint)
-    const photoDataUrls: string[] = [];
+    // fetch each photo (authenticated content endpoint), turned upright for the PDF
+    const photos: PdfPhoto[] = [];
     for (const p of saved.photos) {
       try {
-        const blob = await fetchFileBlob(p.fileId);
-        photoDataUrls.push(await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); }));
+        const photo = await loadPdfPhoto(await fetchFileBlob(p.fileId));
+        if (photo) photos.push(photo);
       } catch { /* skip */ }
     }
     const bytes = buildDailyReportPdf({
       report: saved,
-      photoDataUrls,
+      photos,
       letterhead: {
         brandRgb: hexToRgb(settings.companyBrandColor || '#99CB38'),
         company: {
@@ -340,7 +341,7 @@ export const DailyReportEditor: React.FC<{
                     classes start with w-full, which in this flex row out-muscled
                     a passed w-20 and made the count box the WIDE one. */}
                 <div className="w-20 flex-none">
-                  <NumberInput min={0} value={l.count} onChange={e => updateManCount(i, { count: Number(e.target.value) })} />
+                  <NumberInput allowEmpty min={0} value={l.count} onChange={e => updateManCount(i, { count: Number(e.target.value) })} />
                 </div>
                 <button onClick={() => removeManCountLine(i)} title="Remove" className="rounded-md p-1.5 text-ink-faint hover:bg-hover hover:text-red-600"><Trash2 size={14} /></button>
               </div>

@@ -18,6 +18,8 @@ describe('invoice pdf data shaping', () => {
 // A 1x1 JPEG — jsPDF needs a real decodable image to embed.
 const JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
 
+const photo = { dataUrl: JPEG, width: 1, height: 1 };
+
 const baseInvoice = (overrides: Record<string, unknown> = {}) => ({
   id: 'inv1', projectId: 'p1', number: 'INV-1', date: null, status: 'draft', terms: null, notes: null,
   version: 1, createdAt: 0, updatedAt: 0, lines: [], payments: [], photos: [], attachments: [],
@@ -33,10 +35,10 @@ describe('buildInvoicePdf — photo pages', () => {
     expect(doc.getPageCount()).toBe(1);
   });
 
-  it('appends a photos page (page count grows) when photoDataUrls is non-empty', async () => {
+  it('appends a photos page (page count grows) when there are photos', async () => {
     const withoutPhotos = await PDFDocument.load(buildInvoicePdf({ invoice: baseInvoice(), projectName: 'Job', letterhead }));
     const withPhotos = await PDFDocument.load(
-      buildInvoicePdf({ invoice: baseInvoice(), projectName: 'Job', letterhead, photoDataUrls: [JPEG, JPEG, JPEG] }),
+      buildInvoicePdf({ invoice: baseInvoice(), projectName: 'Job', letterhead, photos: [photo, photo, photo] }),
     );
     expect(withPhotos.getPageCount()).toBeGreaterThan(withoutPhotos.getPageCount());
   });

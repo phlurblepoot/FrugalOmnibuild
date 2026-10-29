@@ -8,14 +8,7 @@ import type { Project } from '../../../types';
 import { computeRevisionModel } from '../../../utils/planSets';
 import { generateProposalPdf, type ProposalGenResult, type TakeoffTotals } from './proposalGenerator';
 import { buildLetterhead } from './proposalLetterhead';
-
-export const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result as string);
-    fr.onerror = () => reject(new Error('file read failed'));
-    fr.readAsDataURL(blob);
-  });
+import { loadPdfPhoto, type PdfPhoto } from '../../../utils/pdfPhotos';
 
 export interface BuildProposalPdfArgs {
   /** The snapshot to render — the editor merges its unsaved draft over the row. */
@@ -39,10 +32,11 @@ export async function buildProposalPdf({
   // An unreadable photo is dropped silently — it would only ever be a blank
   // cell on the page — while a dropped attachment loses a whole document the
   // estimator deliberately added, so that one is reported.
-  const photos: { dataUrl: string; caption: string | null }[] = [];
+  const photos: (PdfPhoto & { caption: string | null })[] = [];
   for (const p of proposal.photos) {
     try {
-      photos.push({ dataUrl: await blobToDataUrl(await fetchFileBlob(p.fileId)), caption: p.caption });
+      const photo = await loadPdfPhoto(await fetchFileBlob(p.fileId));
+      if (photo) photos.push({ ...photo, caption: p.caption });
     } catch {
       /* skip */
     }

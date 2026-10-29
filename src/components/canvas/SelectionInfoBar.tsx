@@ -57,7 +57,7 @@ export function SelectionInfoBar({ summary, multiCount }: {
         <span className="text-sm font-semibold text-ink truncate">{summary.measurementName}</span>
         <span className="flex items-center gap-1.5 text-xs text-ink-soft min-w-0">
           <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: summary.color }} />
-          <span className="truncate">{summary.takeoffName ?? 'Ungrouped'}</span>
+          <span className="truncate">{summary.takeoffName ?? 'Quick measurement'}</span>
         </span>
       </div>
       {summary.segment && (

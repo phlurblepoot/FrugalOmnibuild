@@ -1,171 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { MeasurementTakeoff, TakeoffTemplate, Project } from '../types';
 import { evaluateMathExpression, UNIT_LABELS } from '../utils/math';
-
-// ── Private sub-component ────────────────────────────────────────────────────
-
-const CustomCostRow: React.FC<{
-  item: any;
-  index: number;
-  unitLabel: string;
-  onChange: (index: number, updated: any) => void;
-  onRemove: (index: number) => void;
-}> = ({ item, index, unitLabel, onChange, onRemove }) => {
-  const handleMathBlur = (field: string, value: string) => {
-    if (value.startsWith('=')) {
-      const result = evaluateMathExpression(value);
-      if (result !== null) {
-        onChange(index, { ...item, [field]: result.toString() });
-      }
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-2 p-3 bg-raised rounded-lg border border-edge shadow-sm">
-      <div className="flex gap-2 items-center">
-        <select
-          value={item.type}
-          onChange={(e) => onChange(index, { ...item, type: e.target.value as any })}
-          className="text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-sunken text-ink"
-        >
-          <option value="flat">Flat Cost</option>
-          <option value="yield">Material Yield</option>
-          <option value="unit">Cost per {unitLabel}</option>
-          <option value="amount_per_units">Rate per {unitLabel}s</option>
-        </select>
-        <input
-          type="text"
-          value={item.name}
-          onChange={(e) => onChange(index, { ...item, name: e.target.value })}
-          placeholder="Line Name"
-          className="flex-1 text-xs border border-edge-strong rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-        />
-        <button
-          onClick={() => onRemove(index)}
-          className="p-1.5 text-ink-faint hover:text-red-500 transition-colors"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-
-      <div className="flex gap-2 items-center pl-2 border-l-2 border-accent-100 dark:border-accent-800">
-        {item.type === 'flat' && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-ink-faint uppercase">Cost:</span>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
-              <input
-                type="text"
-                value={item.cost || '0'}
-                onChange={(e) => onChange(index, { ...item, cost: e.target.value })}
-                onBlur={(e) => handleMathBlur('cost', e.target.value)}
-                className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-              />
-            </div>
-          </div>
-        )}
-
-        {item.type === 'yield' && (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-ink-faint uppercase">Yield:</span>
-              <input
-                type="text"
-                value={item.yield || '0'}
-                onChange={(e) => onChange(index, { ...item, yield: e.target.value })}
-                onBlur={(e) => handleMathBlur('yield', e.target.value)}
-                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-              />
-              <span className="text-[10px] text-ink-soft">{unitLabel} per unit</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-ink-faint uppercase">Unit:</span>
-              <input
-                type="text"
-                value={item.unit || ''}
-                onChange={(e) => onChange(index, { ...item, unit: e.target.value })}
-                placeholder="e.g. bags"
-                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-ink-faint uppercase">Cost:</span>
-              <div className="relative">
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
-                <input
-                  type="text"
-                  value={item.cost || '0'}
-                  onChange={(e) => onChange(index, { ...item, cost: e.target.value })}
-                  onBlur={(e) => handleMathBlur('cost', e.target.value)}
-                  className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-                />
-              </div>
-            </div>
-          </>
-        )}
-
-        {item.type === 'unit' && (
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold text-ink-faint uppercase">Cost per {unitLabel}:</span>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
-              <input
-                type="text"
-                value={item.costPerUnit || '0'}
-                onChange={(e) => onChange(index, { ...item, costPerUnit: e.target.value })}
-                onBlur={(e) => handleMathBlur('costPerUnit', e.target.value)}
-                className="w-24 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-              />
-            </div>
-          </div>
-        )}
-
-        {item.type === 'amount_per_units' && (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-ink-faint uppercase">Amount:</span>
-              <div className="relative">
-                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-faint text-[10px]">$</span>
-                <input
-                  type="text"
-                  value={item.amount || '0'}
-                  onChange={(e) => onChange(index, { ...item, amount: e.target.value })}
-                  onBlur={(e) => handleMathBlur('amount', e.target.value)}
-                  className="w-20 text-xs border border-edge-strong rounded-lg pl-5 pr-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-ink-faint uppercase">Per:</span>
-              <input
-                type="text"
-                value={item.perUnits || '0'}
-                onChange={(e) => onChange(index, { ...item, perUnits: e.target.value })}
-                onBlur={(e) => handleMathBlur('perUnits', e.target.value)}
-                className="w-16 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-              />
-              <span className="text-[10px] text-ink-soft">{unitLabel}s</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-ink-faint uppercase">Unit:</span>
-              <input
-                type="text"
-                value={item.unit || ''}
-                onChange={(e) => onChange(index, { ...item, unit: e.target.value })}
-                placeholder="e.g. days"
-                className="w-20 text-xs border border-edge-strong rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink"
-              />
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ── Main component ───────────────────────────────────────────────────────────
+import { CustomCostRow, costLineForEditing } from './CustomCostRow';
 
 interface NewTakeoffModalProps {
   open: boolean;
@@ -221,14 +59,7 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
     setCostPerUnit(template.costPerUnit?.toString() || '');
     setIsAdvanced(template.isAdvancedCost || false);
     setCustomCosts(
-      (template.customCosts || []).map(c => ({
-        ...c,
-        cost: c.cost?.toString() || '0',
-        yield: (c as any).yield?.toString() || '0',
-        costPerUnit: c.costPerUnit?.toString() || '0',
-        amount: (c as any).amount?.toString() || '0',
-        perUnits: (c as any).perUnits?.toString() || '0',
-      }))
+      (template.customCosts || []).map(costLineForEditing)
     );
   };
 
@@ -406,7 +237,7 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
                     if (result !== null) setCostPerUnit(result.toString());
                   }
                 }}
-                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink disabled:bg-sunken disabled:text-ink-faint"
+                className="w-full border border-edge-strong rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-500 bg-raised text-ink placeholder:text-ink-faint disabled:opacity-60 disabled:text-ink-faint"
                 placeholder={isAdvanced ? 'Disabled in Advanced' : '0.00 or =95*40%'}
               />
             </div>
@@ -430,7 +261,7 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-xs font-bold text-ink-faint uppercase tracking-wider">Advanced Costing</h4>
                 <button
-                  onClick={() => setCustomCosts([...customCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: '0' }])}
+                  onClick={() => setCustomCosts([...customCosts, { id: uuidv4(), name: '', type: 'unit', costPerUnit: '' }])}
                   className="text-[10px] flex items-center gap-1 text-accent-600 hover:text-accent-700 font-bold uppercase tracking-tight"
                 >
                   <Plus size={12} />
@@ -444,6 +275,7 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
                     item={cost}
                     index={idx}
                     unitLabel={unitLabel}
+                    unitPlaceholder="e.g. days"
                     onChange={(index, updated) => {
                       const updated2 = [...customCosts];
                       updated2[index] = updated;

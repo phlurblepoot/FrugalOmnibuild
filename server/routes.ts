@@ -1603,6 +1603,7 @@ export function registerDataRoutes(app: express.Express, deps: RouteDeps): void 
   });
 
   // Save-as-version: archive current content, overwrite live id in place.
+  // Only for someone who may view the file; anyone else gets a 404.
   app.post(
     '/api/files/:id/versions',
     express.raw({ limit: '100mb', type: () => true }),
@@ -1613,11 +1614,12 @@ export function registerDataRoutes(app: express.Express, deps: RouteDeps): void 
         if (!Buffer.isBuffer(body) || body.length === 0) {
           return res.status(400).json({ error: 'Empty body' });
         }
+        const viewer = (req as any).user ?? {};
         const target = getMeta(db, req.params.id);
-        if (!target) return res.status(404).json({ error: 'File not found' });
+        if (!target || !mayViewFile(target, viewer)) return res.status(404).json({ error: 'File not found' });
         if (target.parentFileId) return res.status(400).json({ error: 'Cannot version a historical file row' });
         const mime = (req.get('Content-Type') || 'application/octet-stream').split(';')[0].trim();
-        const result = saveNewVersion(db, dataDir, req.params.id, body, mime, (req as any).user?.id);
+        const result = saveNewVersion(db, dataDir, req.params.id, body, mime, viewer.id);
         deps.broadcastChange({ type: 'file', id: req.params.id, projectId: target.projectId ?? undefined, action: 'updated', ...requestMeta(req) });
         res.json({ success: true, ...result });
       } catch (e) {

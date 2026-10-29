@@ -17,7 +17,10 @@ import { useTheme, AccentKey } from '../context/ThemeContext';
 import { getAiStatus, aiAutoNameEnabled, setAiAutoNameEnabled, type AiStatus } from '../utils/aiSheets';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { Field, Input, NumberInput } from '../components/ui';
+import { Button, Field, Input, NumberInput } from '../components/ui';
+import { useWhatsNew } from '../whatsNew/WhatsNewProvider';
+import { RELEASES } from '../whatsNew/releases';
+import { APP_VERSION, releasesToShow } from '../whatsNew/versions';
 
 // ── Changelog data ────────────────────────────────────────────────────────────
 
@@ -28,6 +31,161 @@ interface ChangelogEntry {
 }
 
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '4.7.0',
+    date: 'October 29, 2026',
+    changes: [
+      'New: a "What\'s new" popup. The app now remembers the last version each person has seen (with their account, so it follows them from computer to iPad), and the first time they open it after an update, a short tour shows what changed: one page per change, each with a picture, paged with Back and Next, the dots or the arrow keys. Done, Skip or × marks it as seen; Settings › Changelog has a button to see it again.',
+      'This first time the tour covers everything since 4.6: Sketch, the 3D drawing tool for measured shapes; quick measurements and feet-and-inches lengths on the takeoff canvas; and the fixes. Accounts added from now on start on the version they were made in, so they are not shown changes from before they joined. Updates with only small fixes are remembered without a popup.',
+      'Version 4.7 brings together everything from 4.6.1 to 4.6.9.7.',
+    ],
+  },
+  {
+    version: '4.6.9.7',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 4, part 2): drawing on an iPad. With a finger or the Apple Pencil, press, slide to aim (the snapping and the length follow, shown above your fingertip) and lift to place the point; pull and move the same way. Points and lines are easier to hit with a finger.',
+      'Sketch: the Apple Pencil shows where it will draw while it hovers (on iPads that support it). Once you use the Pencil it does the drawing and fingers move the view, so a resting hand cannot add points; the hand button in the toolbar lets fingers draw again.',
+      'Sketch: on a touch screen, double-tap to end a line where it is; tap with two fingers to undo (while drawing, to take back the last point) and with three to redo. Back, Done and Cancel buttons appear while drawing, for when there is no keyboard.',
+      'Sketch: bigger buttons on touch screens, and typing a size no longer makes an iPad zoom in.',
+    ],
+  },
+  {
+    version: '4.6.9.6',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 4, part 1): a new Round or bevel edges tool (E). Click the edges of a solid (the one under the pointer lights up), or click a face to pick all the edges round it; click one again to leave it out, or Backspace for the last. Type the radius (Round) or how far back to cut (Bevel) and the solid shows it straight away; Enter makes it a step.',
+      'Sketch: a size too big for the edges picked is caught before it is made, with a message saying so. Rounds and bevels are in the step list, where the size can be changed later, and they show in drawing sheets, pictures and CAD files.',
+      'Sketch: a step that cannot be built now says why in the step list as well as at the top of the view.',
+    ],
+  },
+  {
+    version: '4.6.9.5',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 3, part 2): Export can now also make a picture (PNG) of the view as it is on screen, as big as on screen or two or three times bigger, on white without the grid or just as it looks, with or without the dimensions.',
+      'Sketch: Export can make a CAD file (DXF) for CAD programs and CNC cutters: the shapes drawn on the Front, Side or Ground plane at true size, with lines, arcs and circles kept exact for cutting a profile, or a flat Front, Top or Right side view of the whole model with hidden edges on their own dashed layer if you want them. Files are in inches for feet-and-inches sketches and millimetres for metric ones.',
+      'Sketch: the Export window remembers the format and choices you used last on this device.',
+    ],
+  },
+  {
+    version: '4.6.9.4',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 3, part 1): Export makes a drawing sheet (PDF): Front, Top and Right side with hidden edges dashed, overall sizes dimensioned and the lengths of the profiles each view looks at, plus a 3D view, and a title block with your company, the sketch and project names, notes, date, units and scale. Pick the views, the 3D view\'s angle (the usual one, or as you have turned it) and size, the paper (Letter, 11 × 17, A4, A3) and the scale, then Download it or Save it to Documents (filed as a Sketch Export).',
+      'Sketch: the flat views share one standard scale and line up when that keeps them readable; for something long with a small profile, such as a cornice run, each view gets the largest scale that fits it, written under it. The 3D view only takes the room the flat views leave, up to the size you pick.',
+      'Sketch: Arc now turns itself off after one arc, back to straight lines.',
+    ],
+  },
+  {
+    version: '4.6.9.3',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 2, part 3): reference photos. Use the picture button in the toolbar to lay a photo, scan or print on the plane you are drawing on, and trace over it. Upload one, or pick a picture already in Documents; a PDF shows its first page. Pictures you add are filed in Documents as Sketch References.',
+      'Sketch: Set scale makes a photo measure true. Click the two ends of a length you know on it (a dimension on the print, a door width in a photo), then type how long it really is. Fade, Turn and Move are by it in the Reference photos list, which also hides or takes off a photo (its file stays in Documents).',
+    ],
+  },
+  {
+    version: '4.6.9.2',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 2, part 2): Join/Cut (J) puts two solids together, or cuts one away from another. Pick Join or Cut at the bottom, then click the two solids.',
+      'Sketch: Move (M) moves a solid, or with Copies set, leaves it and makes that many copies, each one step further on. Click the solid, the point to move from, then where it goes, or type the length and angle. You see where it will land before you click.',
+      'Sketch: Rotate (T) turns a solid round a point on the plane you draw on, by the angle you click or type (counter-clockwise; minus for clockwise). With Copies it makes copies round the point.',
+      'Sketch: Mirror (I) flips a solid across a line you click on the plane you draw on, keeping the original unless you untick Keep the original.',
+      'Sketch: these steps show in the Steps list too, where a move\'s distance, a rotation\'s angle and the number of copies can be changed. Deleting a solid tidies away the joins, moves and copies that used it.',
+    ],
+  },
+  {
+    version: '4.6.9.1',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 2, part 1): Spin turns a closed shape round a line in its plane, all the way round or by an angle you type, for columns, rosettes and curved mouldings. Pick the shape, then click two points on the line; the turned shape shows as you move.',
+      'Sketch: Run along a path sends a profile along a path, such as a cornice round a room, with mitred corners. Draw the profile across the path where it starts (on Front for a path that runs back, for example), then pick the profile and the path. The path can be open or closed and can have arcs.',
+      'Sketch: a Steps list (the list button by the views) shows each pull, cut, spin and run in order. Pick one to see it on the model, change its distance or angle, or delete it; its shape comes back as an outline.',
+      'Sketch: lines are easier to pick, and the strip along the bottom of the drawing no longer blocks the pointer beside the size boxes.',
+    ],
+  },
+  {
+    version: '4.6.9',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch: a new sketch opens looking straight at the Front plane, a flat grid ready to draw on.',
+      'Sketch: Backspace takes back the last point while drawing, as many times as you like, even right after typing a length.',
+      'Sketch: hold Shift to line up with what is already drawn: points snap to ends, midpoints and centres, onto lines and where lines cross, and dashed guides run level or plumb from existing points. Hold Ctrl to keep a line to 15° steps (level, plumb, 30°, 45°, 60°…). Both have on/off buttons in the toolbar for tablets. Lines no longer jump to 45° on their own.',
+      'Sketch: a typed angle is now measured from level, toward the side the pointer is on (45 with the pointer up and to the left goes up-left). The line shows where it will land as you type, before you press Enter, with the angle marked at the corner.',
+      'Sketch: draw on a solid. Pick Face next to Front, Side and Ground, then click a flat face: the view turns to look straight at it with its own grid. A shape drawn there joins the solid when pulled out and cuts a pocket, groove or hole when pulled in. Deleting a solid removes what was drawn on it, and pulling a solid further carries what is on its end along.',
+      'Sketch: a Perspective button for the 3D view. Top, Front and Side stay flat so lengths read true.',
+    ],
+  },
+  {
+    version: '4.6.8',
+    date: 'October 29, 2026',
+    changes: [
+      'Fix: saving a new version of a file now checks that you may see that file. Someone who may not (another person\'s signature, or a billing document for someone who isn\'t an admin) gets "File not found" and the file is left as it was.',
+    ],
+  },
+  {
+    version: '4.6.7',
+    date: 'October 29, 2026',
+    changes: [
+      'New (first stage, still in progress): Sketch, a simple 3D drawing tool for measured shapes such as a cornice profile. Open it from the sidebar, right below Document Editor, or from Documents > New > Sketch. Each sketch is saved in Documents (in a project if you pick one), and each Save keeps a new version.',
+      'Sketch: draw lines, arcs, rectangles and circles on the Front, Side or Ground plane, then use Pull to turn a closed shape into a solid. Type exact sizes as you draw (feet and inches, or millimetres, chosen per sketch); points snap to ends, the grid and 45° angles, and every edge is labelled with its length. Top, Front, Side and 3D views: scroll or pinch to zoom, right-drag or two-finger drag to pan, and in 3D drag with the Select tool to turn the model.',
+      'Sketch: one person edits a sketch at a time; others can look and see it update when it is saved. Phones open sketches to view only. The 3D engine is a large download the first time a sketch opens.',
+      'Fix: dialog buttons and the bottom of the sidebar no longer sit flush against the bottom edge.',
+    ],
+  },
+  {
+    version: '4.6.6',
+    date: 'October 29, 2026',
+    changes: [
+      'New: quick measurements on the takeoff canvas. Press Measure in the toolbar (or + Measure in the sidebar) to measure lengths and areas without picking a takeoff. Each line or area is its own measurement, drawn dash-dot in magenta and labelled in feet and inches. They are saved and shown live to everyone on the plan, but are never priced and never count in totals, the Takeoffs tab or proposals. Press Done or Esc to stop.',
+      'New: the sidebar lists them under Quick measurements, with an eye button to hide or show them on the plan (on this device only). Select one and pick "Move to takeoff" (or drag it onto a takeoff) to turn it into a priced measurement.',
+    ],
+  },
+  {
+    version: '4.6.5',
+    date: 'October 29, 2026',
+    changes: [
+      'Change: on the takeoff canvas, lengths now read in feet and inches to the nearest 1/32", such as 30\' - 6 1/2". This covers the labels on the plan and the selection bar, even when the takeoff counts in inches, feet or yards. Totals, the sidebar, the legend, exports and prices still use the exact decimal value.',
+      'Change: a line\'s label now runs along the line, centred just above it, and never reads upside down. A vertical line\'s label reads from bottom to top.',
+    ],
+  },
+  {
+    version: '4.6.4',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: photos in generated PDFs (proposals, daily reports, RFIs, issues, invoices and change orders) now come out the right way up. A photo taken upright on a phone used to come out sideways.',
+      'Fix: photos in those PDFs keep their shape instead of being stretched to fill a box, and they are bigger: still two per row, with a portrait photo as tall as a landscape one is wide.',
+    ],
+  },
+  {
+    version: '4.6.3',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: with "Set type per file" ticked in Save to Documents (from Mail) and Upload documents, each file\'s Type box no longer stretches across the row and hides the file name. The name sits on the left and the Type on the right; on a phone the Type drops onto its own line under the name.',
+      'Change: each file\'s type is guessed when you add it: photos as Photo, spreadsheets as Spreadsheet, everything else as Document. When the files are of different types, "Set type per file" turns on by itself. While it is on, the shared Type box is hidden.',
+      'Fix: boxes that were meant to be narrow now are, for example the backup time, the Tasks filters, invoice and change order quantity and price, and the payment fields. They were stretching to full width.',
+    ],
+  },
+  {
+    version: '4.6.2',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: in dark mode, text you type is no longer black on a dark box. This covers the takeoff canvas (Advanced Costing, Wall Heights, renaming a measurement, the page and region scale lists) and any other box in the app that was missing its own text colour.',
+      'Change: in dark mode, the canvas filter box, the takeoff total badges and greyed-out fields now match the panels around them instead of showing as near-black boxes.',
+      'Change: the Project Notes board stays white like paper in dark mode too, so black notes text stays readable.',
+    ],
+  },
+  {
+    version: '4.6.1',
+    date: 'October 28, 2026',
+    changes: [
+      'Fix: the Advanced Costing boxes on a takeoff (Cost, Yield, Cost per, Amount and Per) no longer put a 0 back when you clear them. An empty box shows a faded 0 that goes away as you type, and it still counts as 0.',
+      'Fix: a 0 saved in Wall Heights now reopens as an empty box instead of a 0 that your typing lands next to.',
+      'Change: clearing an invoice or change order quantity or unit price, a lien release amount, or a daily report man count now counts as 0, instead of putting the old number back.',
+    ],
+  },
   {
     version: '4.6.0',
     date: 'October 18, 2026',
@@ -1363,8 +1521,21 @@ const PreferencesTab: React.FC = () => {
 
 // ── Changelog tab ─────────────────────────────────────────────────────────────
 
-const ChangelogTab: React.FC = () => (
+const ChangelogTab: React.FC = () => {
+  const { show } = useWhatsNew();
+  const latest = releasesToShow(RELEASES, null, APP_VERSION)[0];
+  return (
   <div className="space-y-6">
+    {latest && (
+      <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-edge bg-raised p-5 shadow-sm">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-100 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300"><Sparkles size={18} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-ink">What&apos;s new in {latest.version}</p>
+          <p className="text-sm text-ink-soft">A short tour of what changed, one page per change, with pictures.</p>
+        </div>
+        <Button variant="secondary" onClick={show} data-testid="see-whats-new">See what&apos;s new</Button>
+      </div>
+    )}
     {CHANGELOG.map((entry, i) => (
       <div key={entry.version} className="bg-raised rounded-2xl border border-edge shadow-sm overflow-hidden">
         <div className="p-6 border-b border-edge flex items-center gap-3">
@@ -1391,7 +1562,8 @@ const ChangelogTab: React.FC = () => (
       </div>
     ))}
   </div>
-);
+  );
+};
 
 const StorageTab: React.FC = () => {
   const { toast } = useToast();

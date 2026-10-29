@@ -21,9 +21,12 @@ export const NON_ADMIN_EXCLUDED_KINDS = ['invoice', 'payapp-export', 'payapp-pdf
 // sourceType is owned by a record you delete it at (an invoice, an issue, a
 // proposal); a takeoff print/export has no owning record — its sourceId is a
 // bare printout id that exists only on the file row — so refusing to delete it
-// would strand it in the Documents list forever. Historical VERSIONS of one
+// would strand it in the Documents list forever. A sketch is made in the app's
+// sketch editor and has no owning record either, nor do its reference photos
+// (a sketch that loses one just shows it missing) or its exported drawings.
+// Historical VERSIONS of one
 // are still refused (parentFileId check), same as any other file.
-export const DELETABLE_GENERATED_KINDS = ['takeoff-print', 'takeoff-export'] as const;
+export const DELETABLE_GENERATED_KINDS = ['takeoff-print', 'takeoff-export', 'sketch', 'sketch-photo', 'sketch-export'] as const;
 const isDeletableGeneratedKind = (kind: string) =>
   (DELETABLE_GENERATED_KINDS as readonly string[]).includes(kind);
 
@@ -57,6 +60,9 @@ const KIND_LABELS: Record<string, string> = {
   'daily-report-photo': 'Daily Report Photo',
   'email-attachment': 'Email Attachment',
   'payment-attachment': 'Payment Attachment',
+  sketch: 'Sketch',
+  'sketch-photo': 'Sketch Reference',
+  'sketch-export': 'Sketch Export',
 };
 const genericLabel = (kind: string): string => KIND_LABELS[kind] ?? kind;
 

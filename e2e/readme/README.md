@@ -45,6 +45,7 @@ Two Playwright projects:
 - `seed.setup.ts`, `prepare.mjs`, `serve.mjs`: the runners described above.
 - `shot.ts`: shared helpers: sign in (session and theme preferences), settle the page, save a palette-compressed PNG.
 - `desktop.shots.ts` (1440x900, light), `dark.shots.ts` (dashboard, takeoff canvas, mail) and `phone.shots.ts` (390x844, dashboard and a daily report): one test per screen, writing `docs/screenshots/<name>.png`. Adding a screen means adding a test that calls `open()` and `shoot()`.
+- `whats-new.shots.ts`: the pictures in the "What's new" popup (`src/whatsNew/releases.ts`), light and dark, written as WebP to `public/whats-new/<version>/`. It draws each sketch with the editor's own tools and renders the drawing sheet and issue report PDFs with pdf.js. `npm run screenshots:whats-new` runs just the seed and these; a new release adds its own tests and folder.
 
 ## Rules for the demo content
 

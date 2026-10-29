@@ -291,6 +291,53 @@ describe('DELETE /api/files/:id/versions/:versionId', () => {
   });
 });
 
+describe('POST /api/files/:id/versions', () => {
+  const save = (id: string, body: string) =>
+    request(app).post(`/api/files/${id}/versions`).set('Content-Type', 'application/pdf').send(Buffer.from(body));
+
+  it('404s for someone who may not view the file, leaving it untouched', async () => {
+    putBuffer(db, dir, 'inv', Buffer.from('invoice v1'), 'application/pdf', { kind: 'invoice', name: 'Invoice 1001.pdf', createdBy: 'alice' });
+    putBuffer(db, dir, 'sig', Buffer.from('sig of alice'), 'image/png', { kind: 'signature', name: 'Signature', createdBy: 'alice' });
+
+    app = buildApp('user', 'bob'); // billing documents are admins' only
+    const r = await save('inv', 'tampered');
+    expect(r.status).toBe(404);
+    expect(r.body).toEqual({ error: 'File not found' });
+    app = buildApp('admin', 'carol'); // a signature is its owner's alone
+    expect((await save('sig', 'tampered')).status).toBe(404);
+
+    expect(readFileContent(dir, 'inv')!.toString()).toBe('invoice v1');
+    expect(readFileContent(dir, 'sig')!.toString()).toBe('sig of alice');
+    expect(listVersions(db, 'inv')).toHaveLength(1);
+    expect(listVersions(db, 'sig')).toHaveLength(1);
+  });
+
+  it('hides a historical row from someone who may not view it, and still 400s it for someone who may', async () => {
+    putBuffer(db, dir, 'inv', Buffer.from('v1'), 'application/pdf', { kind: 'invoice', name: 'Invoice 1001.pdf' });
+    saveNewVersion(db, dir, 'inv', Buffer.from('v2'), 'application/pdf');
+    const [, v1] = listVersions(db, 'inv');
+    app = buildApp('user', 'bob');
+    expect((await save(v1.id, 'x')).status).toBe(404);
+    app = buildApp('admin', 'carol');
+    expect((await save(v1.id, 'x')).status).toBe(400);
+  });
+
+  it('saves a new version for someone who may view the file', async () => {
+    putBuffer(db, dir, 'inv', Buffer.from('invoice v1'), 'application/pdf', { kind: 'invoice', name: 'Invoice 1001.pdf' });
+    putBuffer(db, dir, 'sig', Buffer.from('sig v1'), 'image/png', { kind: 'signature', name: 'Signature', createdBy: 'bob' });
+
+    app = buildApp('admin', 'alice');
+    expect((await save('inv', 'invoice v2')).status).toBe(200);
+    app = buildApp('user', 'bob');
+    expect((await save('sig', 'sig v2')).status).toBe(200);
+
+    expect(readFileContent(dir, 'inv')!.toString()).toBe('invoice v2');
+    expect(readFileContent(dir, 'sig')!.toString()).toBe('sig v2');
+    expect(getMeta(db, 'inv')).toMatchObject({ versionNumber: 2, createdBy: 'alice' });
+    expect(getMeta(db, 'sig')).toMatchObject({ versionNumber: 2, createdBy: 'bob' });
+  });
+});
+
 describe('replaceLiveContent', () => {
   it('swaps the live bytes in place: same version number, history kept, size and hash updated', () => {
     putBuffer(db, dir, 'f1', Buffer.from('v1'), 'application/pdf', { name: 'Bid.pdf', createdBy: 'alice' });

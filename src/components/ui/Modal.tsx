@@ -166,7 +166,7 @@ export const Modal: React.FC<ModalProps> = ({
             )}
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
             {footer && (
-              <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-edge px-5 py-4 pb-safe">
+              <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-edge px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                 {footer}
               </div>
             )}

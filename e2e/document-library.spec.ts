@@ -24,6 +24,7 @@ test('New document: a blank spreadsheet filed in the chosen project opens in the
   const { projectId, name: projectName } = await seedProjectWithPage(request, apiToken.token);
   await authedPage.goto('/documents');
   await authedPage.getByTestId('documents-new').click();
+  await authedPage.getByTestId('documents-new-document').click();
   const dialog = authedPage.getByTestId('new-document-modal');
   await dialog.getByRole('radio', { name: /Excel spreadsheet/ }).click();
   await authedPage.getByLabel('Name').fill('Quantities');
@@ -77,6 +78,7 @@ test('Document Templates: add the letterhead and an upload, then start a documen
   // Starting a document from it copies its bytes.
   await authedPage.goto('/documents');
   await authedPage.getByTestId('documents-new').click();
+  await authedPage.getByTestId('documents-new-document').click();
   await authedPage.getByLabel('Start from').selectOption({ label: 'Bid form.docx' });
   await authedPage.getByLabel('Name').fill('Bid for Maple');
   await authedPage.getByLabel('Project').selectOption({ label: projectName });

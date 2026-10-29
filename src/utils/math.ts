@@ -257,17 +257,19 @@ export const calculateSurfaceAreaPx = (
   return areaPx * (isTwoSided ? 2 : 1);
 };
 
-export const formatFeetAndInches = (decimalFeet: number): string => {
-  const totalSixteenths = Math.round(decimalFeet * 12 * 16);
-  const f = Math.floor(totalSixteenths / (12 * 16));
-  const remainingSixteenths = totalSixteenths % (12 * 16);
-  const i = Math.floor(remainingSixteenths / 16);
-  const frac = remainingSixteenths % 16;
+/** `30' - 6 1/2"`, rounded to the nearest 1/`denominator` inch (a power of
+ *  two) with the fraction reduced. */
+export const formatFeetAndInches = (decimalFeet: number, denominator: number = 16): string => {
+  const totalParts = Math.round(decimalFeet * 12 * denominator);
+  const f = Math.floor(totalParts / (12 * denominator));
+  const remainingParts = totalParts % (12 * denominator);
+  const i = Math.floor(remainingParts / denominator);
+  const frac = remainingParts % denominator;
 
   let fractionStr = '';
   if (frac > 0) {
     let num = frac;
-    let den = 16;
+    let den = denominator;
     while (num % 2 === 0 && den % 2 === 0) {
       num /= 2;
       den /= 2;
@@ -502,6 +504,29 @@ export const formatMeasurement = (
 
   const realValue = calculateRealValue(pixelValue, type, scale);
   return formatRealValue(realValue, type, scale.unit, takeoff, includeCost);
+};
+
+const IMPERIAL_LENGTH_UNITS = ['in', 'inch', 'inches', 'ft', 'foot', 'feet', 'yd', 'yard', 'yards'];
+// "sqft" counts: an area takeoff's unit words the run length of a surface area.
+const isImperialLength = (unit: string | undefined): boolean =>
+  !!unit && IMPERIAL_LENGTH_UNITS.includes(unit.toLowerCase().replace(/\s+/g, '').replace(/^(sq|square)/, ''));
+
+/** The labels drawn over the plan: an imperial length reads as feet and
+ *  inches to 1/32", whatever unit its takeoff totals in. Display only; every
+ *  total and price still uses the exact value. Anything else reads as
+ *  formatMeasurement words it. */
+export const formatCanvasMeasurement = (
+  pixelValue: number,
+  type: 'length' | 'area' | 'count',
+  scale: ScaleConfig | null,
+  takeoff?: MeasurementTakeoff,
+): string => {
+  if (type === 'length' && scale && scale.pixelDistance !== 0 && isImperialLength(scale.unit)
+    && (!takeoff?.unit || isImperialLength(takeoff.unit))) {
+    const feet = convertUnit(calculateRealValue(pixelValue, 'length', scale), scale.unit, 'ft', 'length');
+    return formatFeetAndInches(feet, 32);
+  }
+  return formatMeasurement(pixelValue, type, scale, takeoff);
 };
 
 export const calculateRealValue = (

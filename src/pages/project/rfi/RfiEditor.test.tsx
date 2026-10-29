@@ -250,7 +250,7 @@ describe('RfiEditor — document actions', () => {
 
     await waitFor(() => expect(h.buildRfiPdf).toHaveBeenCalledTimes(1));
     expect(h.buildRfiPdf.mock.calls[0][0].rfi).toBe(SAVED);
-    expect(h.buildRfiPdf.mock.calls[0][0].photoDataUrls).toHaveLength(1);
+    expect(h.buildRfiPdf.mock.calls[0][0].photos).toHaveLength(1);
 
     await waitFor(() => expect(h.persistGeneratedDocument).toHaveBeenCalledTimes(1));
     expect(h.persistGeneratedDocument.mock.calls[0][1]).toMatchObject({

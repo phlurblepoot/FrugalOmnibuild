@@ -1,5 +1,6 @@
 // src/pages/project/issues/issuePdf.ts
 import { jsPDF } from 'jspdf';
+import { drawPhotoGrid, type PdfPhoto } from '../../../utils/pdfPhotos';
 import { Issue } from '../../../utils/store';
 import {
   LetterheadContext,
@@ -14,7 +15,7 @@ export interface IssuePdfContext {
   issue: Issue;
   projectName: string;
   contractor?: string | null;
-  photoDataUrls: string[]; // pre-fetched (caller resolves each fileId → dataURL)
+  photos: PdfPhoto[]; // pre-fetched and upright (caller loads each fileId with loadPdfPhoto)
   /** Branded header/footer + brand accent colour (replaces the per-user UI accent). */
   letterhead: LetterheadContext;
   /** When provided and non-empty, overrides the company email shown in the document header. */
@@ -76,19 +77,11 @@ export function buildIssuePdf(ctx: IssuePdfContext): Uint8Array {
   }
 
   // Photos grid (2 per row)
-  if (ctx.photoDataUrls.length) {
+  if (ctx.photos.length) {
     if (y + 28 > bottom) newPage();
     doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(60, 60, 60);
     doc.text('Photos', M, y); y += 14;
-    const cellW = (W - 2 * M - 12) / 2, cellH = 150;
-    let col = 0;
-    for (const url of ctx.photoDataUrls) {
-      if (y + cellH > bottom) { newPage(); col = 0; }
-      const x = M + col * (cellW + 12);
-      try { doc.addImage(url, 'JPEG', x, y, cellW, cellH, undefined, 'FAST'); } catch { /* skip bad image */ }
-      col++;
-      if (col === 2) { col = 0; y += cellH + 12; }
-    }
+    y = drawPhotoGrid(doc, ctx.photos, { left: M, width: W - 2 * M, y, bottom, newPage: () => { newPage(); return y; } });
   }
 
   return doc.output('arraybuffer') as unknown as Uint8Array;
