@@ -36,7 +36,8 @@ import {
 import { SketchScene, viewForPlane, type Pick, type ViewName } from './sketchScene';
 import { buildSolids, projectViews } from './geometryClient';
 import type { ViewSpec } from './geometryTypes';
-import { SketchExportModal, type PdfOptions } from './SketchExportModal';
+import { SketchExportModal, type ExportOptions } from './SketchExportModal';
+import { planeEntities, polylineEntities, writeDxf } from './sketchDxf';
 import { buildSketchPdf } from './sketchPdf';
 import { SHEET_VIEWS, looseShapeLines, scalesFor, viewLabels, viewSpec, type SheetView } from './sketchViews';
 import type { SolidMesh } from './geometryTypes';
@@ -780,8 +781,38 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   // ── Export ────────────────────────────────────────────────────────────────
   const exportName = () => sketchTitle(meta?.name);
 
-  /** The drawing sheet for the export dialog's choices (what is on screen now, saved or not). */
-  const makePdf = async (o: PdfOptions): Promise<Blob> => {
+  /** The file for the export dialog's choices, from what is on screen now (saved or not). */
+  const makeExport = async (o: ExportOptions): Promise<{ blob: Blob; name: string }> => {
+    if (!doc) throw new Error('The sketch is still opening.');
+    if (o.format === 'pdf') return { blob: await makePdf(o), name: `${exportName()} - drawing.pdf` };
+    if (o.format === 'png') {
+      if (!sceneRef.current) throw new Error('The view is still opening.');
+      const png = await sceneRef.current.exportPng({ scale: o.pngSize, paper: o.pngPaper, labels: o.pngLabels });
+      return { blob: png, name: `${exportName()}.png` };
+    }
+    let entities;
+    let what: string;
+    if (o.dxfWhat === 'plane') {
+      entities = planeEntities(doc, o.dxfPlane);
+      what = `${PLANE_LABELS[o.dxfPlane].toLowerCase()} profile`;
+      if (!entities.length) throw new Error(`Nothing is drawn facing the ${PLANE_LABELS[o.dxfPlane]} plane.`);
+    } else {
+      const sp = viewSpec(o.dxfView, SHEET_VIEWS[o.dxfView].dir, SHEET_VIEWS[o.dxfView].xAxis, o.dxfHidden);
+      const projected = await projectViews(doc, [sp]);
+      if (projected.fatal) throw new Error(`The 3D engine could not draw the view: ${projected.fatal}`);
+      const v = projected.views[0] ?? { visible: [], hidden: [] };
+      entities = [
+        ...polylineEntities([...v.visible, ...looseShapeLines(doc, sp)], 'VISIBLE'),
+        ...(o.dxfHidden ? polylineEntities(v.hidden, 'HIDDEN') : []),
+      ];
+      what = `${o.dxfView === 'side' ? 'right side' : o.dxfView} view`;
+      if (!entities.length) throw new Error('There is nothing to draw in that view yet.');
+    }
+    return { blob: new Blob([writeDxf(entities, doc.units)], { type: 'application/dxf' }), name: `${exportName()} - ${what}.dxf` };
+  };
+
+  /** The drawing sheet for the export dialog's choices. */
+  const makePdf = async (o: ExportOptions): Promise<Blob> => {
     if (!doc) throw new Error('The sketch is still opening.');
     const specs: ViewSpec[] = (['front', 'top', 'side', 'iso'] as SheetView[]).filter(v => o.views[v]).map(v => {
       if (v === 'iso' && o.isoFrom === 'current' && sceneRef.current) {
@@ -1429,9 +1460,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
               open={exportOpen}
               onClose={() => setExportOpen(false)}
               units={doc.units}
-              makePdf={makePdf}
-              onDownload={blob => downloadBlob(blob, `${exportName()} - drawing.pdf`)}
-              onSave={blob => saveExport(new Blob([blob], { type: 'application/pdf' }), `${exportName()} - drawing.pdf`)}
+              make={makeExport}
+              onDownload={downloadBlob}
+              onSave={saveExport}
             />
           )}
 

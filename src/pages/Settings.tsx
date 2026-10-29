@@ -29,6 +29,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.5',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 3, part 2): Export can now also make a picture (PNG) of the view as it is on screen, as big as on screen or two or three times bigger, on white without the grid or just as it looks, with or without the dimensions.',
+      'Sketch: Export can make a CAD file (DXF) for CAD programs and CNC cutters: the shapes drawn on the Front, Side or Ground plane at true size, with lines, arcs and circles kept exact for cutting a profile, or a flat Front, Top or Right side view of the whole model with hidden edges on their own dashed layer if you want them. Files are in inches for feet-and-inches sketches and millimetres for metric ones.',
+      'Sketch: the Export window remembers the format and choices you used last on this device.',
+    ],
+  },
+  {
     version: '4.6.9.4',
     date: 'October 29, 2026',
     changes: [

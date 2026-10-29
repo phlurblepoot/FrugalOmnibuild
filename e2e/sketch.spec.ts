@@ -430,7 +430,7 @@ test('Sketch: reference photos are laid on the plane, scaled from a known length
   expect(saved.refs[0]).toMatchObject({ name: 'old-drawing.png', hidden: true });
 });
 
-test('Sketch: arc mode turns itself off after one arc; a drawing sheet exports to Documents and downloads', async ({ authedPage: page, apiToken, request }) => {
+test('Sketch: arc mode turns itself off after one arc; exports a drawing sheet, a picture and CAD files to Documents and downloads', async ({ authedPage: page, apiToken, request }) => {
   const auth = { Authorization: `Bearer ${apiToken.token}` };
   await page.goto('/tools/sketch?new=1');
   await page.getByLabel('Name').fill('Cornice C-3');
@@ -485,4 +485,47 @@ test('Sketch: arc mode turns itself off after one arc; a drawing sheet exports t
   await page.getByTestId('sketch-export').click();
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('sketch-export-download').click()]);
   expect(download.suggestedFilename()).toBe('Cornice C-3 - drawing.pdf');
+
+  // A picture of the view, twice the size on screen.
+  await page.getByTestId('sketch-export').click();
+  await page.getByTestId('sketch-export-format-png').click();
+  await page.getByTestId('sketch-export-png-2').check();
+  await page.getByTestId('sketch-export-save').click();
+  await expect(page.getByText('Saved to Documents as "Cornice C-3.png".')).toBeVisible({ timeout: 60_000 });
+  const docs2 = await (await request.get('/api/documents?kinds=sketch-export', { headers: auth })).json();
+  const pngRow = docs2.rows.find((r: { name: string }) => r.name === 'Cornice C-3.png');
+  const png = await (await request.get(`/api/files/${pngRow.id}/content`, { headers: auth })).body();
+  expect(png.subarray(1, 4).toString('latin1')).toBe('PNG');
+  expect(Math.abs(png.readUInt32BE(16) - 2 * (await viewBox(page)).width)).toBeLessThanOrEqual(2); // width from the header
+
+  // A CAD file of the profile at true size, in inches, with the arc exact.
+  await page.getByTestId('sketch-export').click();
+  await expect(page.getByTestId('sketch-export-format-png')).toHaveAttribute('aria-checked', 'true'); // remembered
+  await page.getByTestId('sketch-export-format-dxf').click();
+  await page.getByTestId('sketch-export-dxf-plane').check();
+  await page.getByTestId('sketch-export-modal').getByLabel('Plane', { exact: true }).selectOption('side');
+  await page.getByTestId('sketch-export-download').click();
+  await expect(page.getByTestId('sketch-export-error')).toHaveText('Nothing is drawn facing the Side plane.');
+  await page.getByTestId('sketch-export-modal').getByLabel('Plane', { exact: true }).selectOption('front');
+  const [dxfDownload] = await Promise.all([page.waitForEvent('download'), page.getByTestId('sketch-export-download').click()]);
+  expect(dxfDownload.suggestedFilename()).toBe('Cornice C-3 - front profile.dxf');
+  const dxf = readFileSync((await dxfDownload.path())!).toString('utf8');
+  expect(dxf).toContain('$INSUNITS\r\n70\r\n1\r\n');
+  expect(dxf).toContain('\r\nARC\r\n');
+  // The bottom edge is a 6" line.
+  const lineLengths = [...dxf.matchAll(/\r\nLINE\r\n8\r\nPROFILE\r\n10\r\n(\S+)\r\n20\r\n(\S+)\r\n30\r\n0\r\n11\r\n(\S+)\r\n21\r\n(\S+)\r\n/g)]
+    .map(m => Math.hypot(+m[3] - +m[1], +m[4] - +m[2]));
+  expect(lineLengths.some(l => Math.abs(l - 6) < 1e-4)).toBe(true);
+  expect(dxf.trimEnd().endsWith('EOF')).toBe(true);
+
+  // Or a flat view of the whole model, saved to Documents.
+  await page.getByTestId('sketch-export').click();
+  await page.getByTestId('sketch-export-dxf-view').check();
+  await page.getByTestId('sketch-export-modal').getByLabel('View', { exact: true }).selectOption('top');
+  await page.getByTestId('sketch-export-save').click();
+  await expect(page.getByText('Saved to Documents as "Cornice C-3 - top view.dxf".')).toBeVisible({ timeout: 60_000 });
+  const docs3 = await (await request.get('/api/documents?kinds=sketch-export', { headers: auth })).json();
+  const dxfRow = docs3.rows.find((r: { name: string }) => r.name === 'Cornice C-3 - top view.dxf');
+  const view = await (await request.get(`/api/files/${dxfRow.id}/content`, { headers: auth })).text();
+  expect(view).toMatch(/\r\n(LINE|POLYLINE)\r\n8\r\nVISIBLE\r\n/);
 });

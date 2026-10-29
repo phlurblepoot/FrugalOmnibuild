@@ -442,7 +442,10 @@ export class SketchScene {
     this.requestRender();
   }
 
+  private lastContent: SceneContent | null = null;
+
   setContent(c: SceneContent): void {
+    this.lastContent = c;
     this.clear(this.content);
     this.pickables = [];
     this.units = c.doc.units;
@@ -651,6 +654,76 @@ export class SketchScene {
   snapshot(): string {
     this.renderNow();
     return this.renderer.domElement.toDataURL('image/png');
+  }
+
+  /**
+   * A picture of the view as it is now, `scale` times the size on screen:
+   * on white paper (drawn in the light colours, without the grid) or as on
+   * screen, with the dimension labels drawn in when asked. Nothing being
+   * drawn or previewed is included.
+   */
+  async exportPng(opts: { scale: number; paper: boolean; labels: boolean }): Promise<Blob> {
+    const content = this.lastContent;
+    const dark = this.theme === DARK;
+    const ratio = this.renderer.getPixelRatio();
+    const lightNow = opts.paper && dark;
+    try {
+      if (lightNow && content) { this.theme = LIGHT; this.setContent({ ...content, selectedShapeId: null, selectedFeatureId: null, selectedRefId: null, activeSolidId: null }); }
+      else if (content) this.setContent({ ...content, selectedShapeId: null, selectedFeatureId: null, selectedRefId: null, activeSolidId: null });
+      this.preview.visible = false;
+      this.grid.visible = !opts.paper;
+      this.renderer.setClearColor(opts.paper ? 0xffffff : this.theme.background, 1);
+      this.renderer.setPixelRatio(opts.scale);
+      this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+      this.renderer.render(this.scene, this.camera);
+      const gl = this.renderer.domElement;
+      const out = document.createElement('canvas');
+      out.width = gl.width;
+      out.height = gl.height;
+      const ctx = out.getContext('2d')!;
+      ctx.drawImage(gl, 0, 0);
+      if (opts.labels) this.drawLabels(ctx, opts.scale, opts.paper || !dark);
+      return await new Promise<Blob>((resolve, reject) => out.toBlob(b => (b ? resolve(b) : reject(new Error('The picture could not be made.'))), 'image/png'));
+    } finally {
+      this.renderer.setPixelRatio(ratio);
+      this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+      this.preview.visible = true;
+      this.grid.visible = true;
+      if (lightNow) this.theme = DARK;
+      this.applyTheme();
+      if (content) this.setContent(content);
+    }
+  }
+
+  /** The dimension labels, drawn onto a picture where they sit on screen. */
+  private drawLabels(ctx: CanvasRenderingContext2D, scale: number, light: boolean): void {
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    const v = new THREE.Vector3();
+    this.content.traverse(o => {
+      if (!(o instanceof CSS2DObject) || !o.visible) return;
+      const el = o.element;
+      const text = el.textContent ?? '';
+      if (!text) return;
+      v.setFromMatrixPosition(o.matrixWorld).project(this.camera);
+      if (v.z < -1 || v.z > 1) return;
+      const x = (v.x + 1) / 2 * w, y = (1 - v.y) / 2 * h;
+      const cls = el.className;
+      const pull = cls.includes('sketch-label-pull'), cut = cls.includes('sketch-label-cut');
+      const fg = pull || cut ? '#ffffff' : light ? '#0f172a' : '#e2e8f0';
+      const bg = pull ? '#c026d3' : cut ? '#dc2626' : light ? 'rgba(255,255,255,0.88)' : 'rgba(30,41,59,0.88)';
+      const border = pull || cut ? null : light ? '#cbd5e1' : '#334155';
+      ctx.font = `600 ${11 * scale}px Inter, system-ui, sans-serif`;
+      const tw = ctx.measureText(text).width, padX = 4 * scale, padY = 2 * scale, th = 13 * scale;
+      const bx = x - tw / 2 - padX, by = y - th / 2 - padY / 2, bw = tw + 2 * padX, bh = th + padY;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, bh, 4 * scale);
+      ctx.fillStyle = bg;
+      ctx.fill();
+      if (border) { ctx.lineWidth = scale; ctx.strokeStyle = border; ctx.stroke(); }
+      ctx.fillStyle = fg;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, x - tw / 2, y + scale * 0.5);
+    });
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────
