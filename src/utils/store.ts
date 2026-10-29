@@ -2925,6 +2925,22 @@ export const markAllNotificationsRead = async (): Promise<void> => {
 
 /** People who can be @mentioned in a document's comments, each under the
  *  address ONLYOFFICE keys them by. */
+/** The last app version this person has seen the "What's new" popup for (null: never). */
+export const getWhatsNewSeen = async (): Promise<string | null> => {
+  const res = await fetchWithRetry('/api/me/whats-new', { headers: { ...getAuthHeaders() } });
+  await handleResponse(res);
+  return (await res.json()).lastSeenVersion ?? null;
+};
+
+export const setWhatsNewSeen = async (version: string): Promise<void> => {
+  const res = await fetchWithRetry('/api/me/whats-new', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ lastSeenVersion: version }),
+  });
+  await handleResponse(res);
+};
+
 export const getMentionUsers = async (fileId: string): Promise<{ id: string; name: string; email: string }[]> => {
   const res = await fetchWithRetry(`/api/onlyoffice/mention-users/${encodeURIComponent(fileId)}`, { headers: { ...getAuthHeaders() } });
   await handleResponse(res);

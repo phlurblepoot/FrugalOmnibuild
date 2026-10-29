@@ -1,7 +1,7 @@
 {
   "name": "frugalomnibuild",
   "private": true,
-  "version": "4.6.9.7",
+  "version": "4.7.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -18,7 +18,8 @@
     "test:e2e:ui": "rm -rf .e2e-data && playwright test --ui",
     "demo:seed": "playwright test -c playwright.readme.config.ts --project=seed",
     "demo:serve": "node e2e/readme/serve.mjs",
-    "screenshots": "playwright test -c playwright.readme.config.ts"
+    "screenshots": "playwright test -c playwright.readme.config.ts",
+    "screenshots:whats-new": "playwright test -c playwright.readme.config.ts e2e/readme/seed.setup.ts e2e/readme/whats-new.shots.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

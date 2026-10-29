@@ -17,7 +17,10 @@ import { useTheme, AccentKey } from '../context/ThemeContext';
 import { getAiStatus, aiAutoNameEnabled, setAiAutoNameEnabled, type AiStatus } from '../utils/aiSheets';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
-import { Field, Input, NumberInput } from '../components/ui';
+import { Button, Field, Input, NumberInput } from '../components/ui';
+import { useWhatsNew } from '../whatsNew/WhatsNewProvider';
+import { RELEASES } from '../whatsNew/releases';
+import { APP_VERSION, releasesToShow } from '../whatsNew/versions';
 
 // ── Changelog data ────────────────────────────────────────────────────────────
 
@@ -28,6 +31,15 @@ interface ChangelogEntry {
 }
 
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '4.7.0',
+    date: 'October 29, 2026',
+    changes: [
+      'New: a "What\'s new" popup. The app now remembers the last version each person has seen (with their account, so it follows them from computer to iPad), and the first time they open it after an update, a short tour shows what changed: one page per change, each with a picture, paged with Back and Next, the dots or the arrow keys. Done, Skip or × marks it as seen; Settings › Changelog has a button to see it again.',
+      'This first time the tour covers everything since 4.6: Sketch, the 3D drawing tool for measured shapes; quick measurements and feet-and-inches lengths on the takeoff canvas; and the fixes. Accounts added from now on start on the version they were made in, so they are not shown changes from before they joined. Updates with only small fixes are remembered without a popup.',
+      'Version 4.7 brings together everything from 4.6.1 to 4.6.9.7.',
+    ],
+  },
   {
     version: '4.6.9.7',
     date: 'October 29, 2026',
@@ -1509,8 +1521,21 @@ const PreferencesTab: React.FC = () => {
 
 // ── Changelog tab ─────────────────────────────────────────────────────────────
 
-const ChangelogTab: React.FC = () => (
+const ChangelogTab: React.FC = () => {
+  const { show } = useWhatsNew();
+  const latest = releasesToShow(RELEASES, null, APP_VERSION)[0];
+  return (
   <div className="space-y-6">
+    {latest && (
+      <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-edge bg-raised p-5 shadow-sm">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-100 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300"><Sparkles size={18} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-ink">What&apos;s new in {latest.version}</p>
+          <p className="text-sm text-ink-soft">A short tour of what changed, one page per change, with pictures.</p>
+        </div>
+        <Button variant="secondary" onClick={show} data-testid="see-whats-new">See what&apos;s new</Button>
+      </div>
+    )}
     {CHANGELOG.map((entry, i) => (
       <div key={entry.version} className="bg-raised rounded-2xl border border-edge shadow-sm overflow-hidden">
         <div className="p-6 border-b border-edge flex items-center gap-3">
@@ -1537,7 +1562,8 @@ const ChangelogTab: React.FC = () => (
       </div>
     ))}
   </div>
-);
+  );
+};
 
 const StorageTab: React.FC = () => {
   const { toast } = useToast();

@@ -44,6 +44,7 @@ import { registerOnlyofficeRoutes } from './server/onlyoffice/routes';
 import { removeUserSignatures } from './server/documentLibrary';
 import { createOnlyofficeServices } from './server/onlyoffice/services';
 import { CALLBACK_PATH_PREFIX as ONLYOFFICE_CALLBACK_PATH_PREFIX } from './server/onlyoffice/editorRoutes';
+import { registerWhatsNewRoutes, setLastSeenVersion } from './server/whatsNew';
 
 dotenv.config();
 
@@ -112,6 +113,8 @@ function initDb() {
       db.prepare('INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)').run(
         'admin-id-123', 'admin', hash, 'admin'
       );
+      // A new install has nothing to catch up on: no "What's new" tour.
+      setLastSeenVersion(db, 'admin-id-123', APP_VERSION);
     }
   } catch (error) {
     console.error(`\n================================================================`);
@@ -245,6 +248,7 @@ async function startServer() {
   registerNotificationRoutes(app, { authenticateToken, notifier });
   registerPushRoutes(app, { db, authenticateToken, push });
   registerShareRoutes(app, { db, dataDir: DATA_DIR, env: process.env, authenticateToken });
+  registerWhatsNewRoutes(app, { db, authenticateToken });
 
   // The Playwright e2e harness logs in many times per run (per-worker session +
   // a few explicit logins per spec), which would trip a 10/min cap. Detect the
@@ -316,6 +320,8 @@ async function startServer() {
       db.prepare('INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, ?)').run(
         id, username.trim(), hash, assignedRole
       );
+      // New people start on this version: no "What's new" tour of changes they never saw.
+      setLastSeenVersion(db, id, APP_VERSION);
       broadcastChange({ type: 'user', id, action: 'created', ...requestMeta(req as any) });
       res.json({ success: true, user: { id, username: username.trim(), role: assignedRole } });
     } catch (error: any) {

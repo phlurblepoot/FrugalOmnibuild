@@ -50,6 +50,7 @@ import { AppShell } from './components/shell/AppShell';
 import ProjectConflictListener from './components/ProjectConflictListener';
 import { getSettings } from './utils/store';
 import { isBareRoute } from './utils/locationInfo';
+import { WhatsNewProvider } from './whatsNew/WhatsNewProvider';
 
 const Layout: React.FC<{ appName: string; logoUrl: string }> = ({ appName, logoUrl }) => {
   const location = useLocation();
@@ -64,16 +65,18 @@ const Layout: React.FC<{ appName: string; logoUrl: string }> = ({ appName, logoU
           <CollaborationProvider>
             <NotificationsProvider>
               <NotesProvider>
-                {!isBare && <CommandPalette />}
-                <AppShell appName={appName}>
-                  <FollowPill />
-                  <ThemeWipe />
-                  <CelebrationOverlay />
-                  <NotesOverlay />
-                  <PageTransition>
-                    <Outlet context={{ appName, logoUrl }} />
-                  </PageTransition>
-                </AppShell>
+                <WhatsNewProvider>
+                  {!isBare && <CommandPalette />}
+                  <AppShell appName={appName}>
+                    <FollowPill />
+                    <ThemeWipe />
+                    <CelebrationOverlay />
+                    <NotesOverlay />
+                    <PageTransition>
+                      <Outlet context={{ appName, logoUrl }} />
+                    </PageTransition>
+                  </AppShell>
+                </WhatsNewProvider>
               </NotesProvider>
             </NotificationsProvider>
           </CollaborationProvider>
