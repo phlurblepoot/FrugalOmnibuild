@@ -20,7 +20,7 @@ import type { Page } from '@playwright/test';
 //   supersededPage carries "Wall Old" (supersededMeasurementId)
 //   currentPage    carries "Wall New" (currentMeasurementId)
 // Both are ungrouped length measurements → they render as measurement rows in
-// the sidebar's Ungrouped card, each with data-measurement-id=<id>.
+// the sidebar's Quick measurements card, each with data-measurement-id=<id>.
 // Screenshots of both views land in test-results/ for visual confirmation.
 // ─────────────────────────────────────────────────────────────────────────────
 

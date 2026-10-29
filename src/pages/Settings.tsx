@@ -29,6 +29,14 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.6',
+    date: 'October 29, 2026',
+    changes: [
+      'New: quick measurements on the takeoff canvas. Press Measure in the toolbar (or + Measure in the sidebar) to measure lengths and areas without picking a takeoff. Each line or area is its own measurement, drawn dash-dot in magenta and labelled in feet and inches. They are saved and shown live to everyone on the plan, but are never priced and never count in totals, the Takeoffs tab or proposals. Press Done or Esc to stop.',
+      'New: the sidebar lists them under Quick measurements, with an eye button to hide or show them on the plan (on this device only). Select one and pick "Move to takeoff" (or drag it onto a takeoff) to turn it into a priced measurement.',
+    ],
+  },
+  {
     version: '4.6.5',
     date: 'October 29, 2026',
     changes: [

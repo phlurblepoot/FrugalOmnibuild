@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Edit2, Trash2, Layers } from 'lucide-react';
 import { Measurement, ScaleConfig, MeasurementTakeoff } from '../../types';
-import { calculatePolylineLength, calculatePolygonArea, formatMeasurement, calculateSurfaceAreaPx, expandArcPoints, measurementAreaPx } from '../../utils/math';
+import { calculatePolylineLength, calculatePolygonArea, formatMeasurement, formatCanvasMeasurement, calculateSurfaceAreaPx, expandArcPoints, measurementAreaPx } from '../../utils/math';
 import { measurementMultiplier, multipliedText, formatMultiplied } from '../../utils/multiplier';
 
 export function MeasurementItem({
@@ -21,7 +21,9 @@ export function MeasurementItem({
   projectId,
   planSetName,
   pageIds,
-  testId
+  testId,
+  moveTargets,
+  onMoveToTakeoff,
 }: {
   measurement: Measurement;
   scaleConfig: ScaleConfig | null;
@@ -40,6 +42,10 @@ export function MeasurementItem({
   planSetName?: string;
   pageIds?: string[];
   testId?: string;
+  /** A quick measurement (no takeoff): the takeoffs it can join, offered as a
+   *  "Move to takeoff" list (drag and drop does the same, but not on touch). */
+  moveTargets?: MeasurementTakeoff[];
+  onMoveToTakeoff?: (takeoffId: string) => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(measurement.name);
@@ -55,6 +61,8 @@ export function MeasurementItem({
   // its math on a line of its own under the row: "1250.00 sq ft × 4 =
   // 5000.00 sq ft". Count markers never multiply.
   const multiplier = measurementMultiplier(measurement);
+  // A quick measurement (no takeoff) reads exactly as its label on the plan.
+  const format = measurement.takeoffId ? formatMeasurement : formatCanvasMeasurement;
   const value = (() => {
     if (measurement.type === 'count') return { total: formatMeasurement(1, 'count', scaleConfig, takeoff) };
     const allPts = [
@@ -68,9 +76,9 @@ export function MeasurementItem({
             multiplier, v => formatMeasurement(v, 'area', scaleConfig, takeoff))
         : multipliedText(
             allPts.reduce((sum, pts) => sum + calculatePolylineLength(pts), 0),
-            multiplier, v => formatMeasurement(v, 'length', scaleConfig, takeoff));
+            multiplier, v => format(v, 'length', scaleConfig, takeoff));
     }
-    return multipliedText(measurementAreaPx(measurement), multiplier, v => formatMeasurement(v, 'area', scaleConfig, takeoff));
+    return multipliedText(measurementAreaPx(measurement), multiplier, v => format(v, 'area', scaleConfig, takeoff));
   })();
 
   const handleSaveName = () => {
@@ -220,7 +228,24 @@ export function MeasurementItem({
 
       {selected && !isEditing && (
         <div className="flex items-center gap-2 mt-1" onClick={(e) => e.stopPropagation()}>
-          <span className="text-xs text-ink-soft italic">Drag to move to another takeoff</span>
+          {onMoveToTakeoff ? (
+            moveTargets && moveTargets.length > 0 ? (
+              <select
+                data-testid="move-to-takeoff"
+                aria-label="Move to takeoff"
+                value=""
+                onChange={(e) => { if (e.target.value) onMoveToTakeoff(e.target.value); }}
+                className="min-w-0 max-w-[11rem] text-xs border border-edge rounded-md bg-raised text-ink px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-accent-500"
+              >
+                <option value="">Move to takeoff…</option>
+                {moveTargets.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            ) : (
+              <span className="text-xs text-ink-soft italic">Not priced</span>
+            )
+          ) : (
+            <span className="text-xs text-ink-soft italic">Drag to move to another takeoff</span>
+          )}
           <div className="ml-auto flex items-center gap-3">
             {takeoffType === 'area' && measurement.type === 'length' && (
               <button

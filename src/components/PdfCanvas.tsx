@@ -197,6 +197,9 @@ interface PdfCanvasProps {
   selectedSegmentIdx?: number | null;
   onSelectMeasurement: (id: string | null) => void;
   onSelectSegment?: (id: string, segIdx: number) => void;
+  /** Quick-measure mode: every line or area drawn is a measurement of its own
+   *  (never a segment appended to the selected one). Cutouts still attach. */
+  quickMeasure?: boolean;
   onCancel?: () => void;
   isMultiRegion?: boolean;
   scaleRegions?: ScaleRegion[];
@@ -288,6 +291,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
   selectedSegmentIdx = null,
   onSelectMeasurement,
   onSelectSegment,
+  quickMeasure = false,
   onCancel,
   isMultiRegion = false,
   scaleRegions = [],
@@ -1322,7 +1326,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activePoints, currentTool, measurements, onAddMeasurement, arcMode, onCancel, resumeMeasurementId, activeArcMidIndices, selectedMeasurementId]);
+  }, [activePoints, currentTool, measurements, onAddMeasurement, arcMode, onCancel, resumeMeasurementId, activeArcMidIndices, selectedMeasurementId, quickMeasure]);
 
   const cancelDrawing = () => {
     setActivePoints([]);
@@ -1386,7 +1390,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
       const selected = selectedMeasurementId
         ? measurements.find(m => m.id === selectedMeasurementId)
         : null;
-      const canAppend = !!selected && selected.type === drawingType;
+      const canAppend = !!selected && selected.type === drawingType && (isSubtract || !quickMeasure);
 
       if (isSubtract) {
         // Cutouts attach to the selected area measurement or nowhere. The
@@ -1644,6 +1648,11 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
             wrap: 'none' as const,
           }
         : { offsetY: LABEL_NUDGE_UP / stageScale };
+
+      // A quick measurement (no takeoff, never priced) draws dash-dot, like a
+      // dimension line, so it never reads as part of a takeoff. The gaps are
+      // wide because the round line caps eat half a stroke width from each side.
+      const quickDash = [18 / stageScale, 11 / stageScale, 2 / stageScale, 11 / stageScale];
 
       const isSelected = selectedMeasurementId === m.id;
       // null = whole measurement selected (highlight all segments)
@@ -1946,6 +1955,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                 lineCap="round"
                 closed={m.type === 'area'}
                 fill={m.type === 'area' && !hasHoles ? `${isMultiSelected ? '#f59e0b' : m.color}${isPrimarySelected ? '60' : isMultiSelected ? '50' : '40'}` : undefined}
+                dash={m.takeoffId ? undefined : quickDash}
                 shadowColor={isMultiSelected ? '#f59e0b' : isPrimarySelected ? '#fbbf24' : undefined}
                 shadowBlur={isMultiSelected ? 14 / stageScale : isPrimarySelected ? 18 / stageScale : 0}
                 shadowOpacity={isMultiSelected ? 0.7 : isPrimarySelected ? 0.85 : 0}
@@ -2082,7 +2092,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                   lineCap="round"
                   closed={m.type === 'area'}
                   fill={m.type === 'area' && !hasHoles ? `${m.color}${isSegmentSelected(segIdx) ? '60' : '40'}` : undefined}
-                  dash={seg.subtract ? [10 / stageScale, 7 / stageScale] : undefined}
+                  dash={seg.subtract ? [10 / stageScale, 7 / stageScale] : m.takeoffId ? undefined : quickDash}
                   shadowColor={isSegmentSelected(segIdx) ? '#fbbf24' : undefined}
                   shadowBlur={isSegmentSelected(segIdx) ? 18 / stageScale : 0}
                   shadowOpacity={isSegmentSelected(segIdx) ? 0.85 : 0}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom';
-import { Hand, Ruler, Square, SquareMinus, Settings, Trash2, Download, ArrowLeft, Layers, Plus, Hash, Undo, Redo, ChevronLeft, ChevronRight, Menu, StickyNote, HelpCircle, BoxSelect, AlignStartVertical, AlignEndVertical, History } from 'lucide-react';
+import { Hand, Ruler, RulerDimensionLine, Square, SquareMinus, Settings, Trash2, Download, ArrowLeft, Layers, Plus, Hash, Undo, Redo, ChevronLeft, ChevronRight, Menu, StickyNote, HelpCircle, BoxSelect, AlignStartVertical, AlignEndVertical, History } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { v4 as uuidv4 } from 'uuid';
 import { PdfCanvas } from '../components/PdfCanvas';
@@ -24,6 +24,10 @@ import { MultiplierModal } from '../components/canvas/MultiplierModal';
 import { computeTakeoffTotals } from './project/proposal/proposalGenerator';
 import { CLIENT_SESSION_ID } from '../utils/clientSession';
 import { NumberInput } from '../components/ui';
+import { QUICK_MEASURE_COLOR } from '../utils/quickMeasure';
+
+// Per device: whether quick measurements are shown on the plan.
+const QUICK_VISIBLE_KEY = 'canvas-show-quick-measurements';
 
 const STANDARD_SCALES = [
   { label: '1/32" = 1\'-0"', pixelDistance: 144, realWorldDistance: 32, unit: 'ft' },
@@ -175,6 +179,20 @@ const CanvasViewInner: React.FC = () => {
   const [selectedColor, setSelectedColor] = useState('#3b82f6');
   const [selectedTakeoffId, setSelectedTakeoffId] = useState<string | undefined>(undefined);
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<string | null>(null);
+  // Quick-measure mode: Length and Area draw measurements with no takeoff,
+  // which are never priced or totalled. Selecting a takeoff (or one of its
+  // measurements) leaves it; selecting a quick measurement enters it.
+  const [quickMeasure, setQuickMeasure] = useState(false);
+  // Per device: whether quick measurements are drawn on the plan.
+  const [showQuickMeasurements, setShowQuickMeasurements] = useState(() => {
+    try { return localStorage.getItem(QUICK_VISIBLE_KEY) !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(QUICK_VISIBLE_KEY, showQuickMeasurements ? '1' : '0'); } catch { /* private mode */ }
+  }, [showQuickMeasurements]);
+  useEffect(() => {
+    if (selectedTakeoffId) setQuickMeasure(false);
+  }, [selectedTakeoffId]);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [measurementToDelete, setMeasurementToDelete] = useState<{id: string, targetPageId?: string} | null>(null);
@@ -622,6 +640,7 @@ const CanvasViewInner: React.FC = () => {
         if (takeoffToDelete) { setTakeoffToDelete(null); return; }
         if (showPageJump) { setShowPageJump(false); return; }
         if (selectedMeasurementId) { setSelectedMeasurementId(null); return; }
+        if (quickMeasure) { setQuickMeasure(false); return; }
         return;
       }
 
@@ -706,14 +725,14 @@ const CanvasViewInner: React.FC = () => {
   }, [selectedMeasurementId, selectedSegmentIdx, page, project, history, redoStack, aggregatedMeasurements,
       showShortcutsHelp, showScaleModal, showDeleteConfirm, showTakeoffModal,
       heightsModalMeasurementId, multiplierModalMeasurementId, editingTakeoff, toolDisabledMessage, takeoffToDelete,
-      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly]);
+      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure]);
 
   // When nothing is selected, drawing tools are disabled — reset to pan so the user isn't stuck.
   useEffect(() => {
-    if (!selectedTakeoffId && !selectedMeasurementId && ['length', 'area', 'count'].includes(currentTool)) {
+    if (!selectedTakeoffId && !selectedMeasurementId && !quickMeasure && ['length', 'area', 'count'].includes(currentTool)) {
       setCurrentTool('pan');
     }
-  }, [selectedTakeoffId, selectedMeasurementId]);
+  }, [selectedTakeoffId, selectedMeasurementId, quickMeasure]);
 
   // Subtract needs a real area measurement to cut into — a takeoff-only
   // selection can't receive a hole. Drop back to pan the moment that stops
@@ -931,10 +950,12 @@ const CanvasViewInner: React.FC = () => {
     // Frozen history / phone read-only: never accept new measurements.
     if (readOnly) return;
 
-    // Derive takeoff + color: prefer explicitly selected takeoff, fall back to selected measurement's takeoff
-    const effectiveTakeoffId = selectedTakeoffId
+    // Derive takeoff + color: prefer explicitly selected takeoff, fall back to
+    // selected measurement's takeoff. A quick measurement belongs to none.
+    const effectiveTakeoffId = quickMeasure ? undefined : selectedTakeoffId
       ?? (selectedMeasurement?.takeoffId);
-    const effectiveColor = selectedTakeoffId ? selectedColor : (selectedMeasurement?.color ?? selectedColor);
+    const effectiveColor = quickMeasure ? QUICK_MEASURE_COLOR
+      : selectedTakeoffId ? selectedColor : (selectedMeasurement?.color ?? selectedColor);
 
     const newMeasurement = {
       ...measurement,
@@ -968,6 +989,7 @@ const CanvasViewInner: React.FC = () => {
     setSelectedMeasurementId(m.id);
     setSelectedSegmentIdx(null);
     setSelectedTakeoffId(m.takeoffId);
+    setQuickMeasure(!m.takeoffId);
     if (m.takeoffId) {
       const takeoff = project?.takeoffs.find(t => t.id === m.takeoffId);
       if (takeoff) setSelectedColor(takeoff.color);
@@ -991,12 +1013,46 @@ const CanvasViewInner: React.FC = () => {
     setSelectedMeasurementId(m.id);
     setSelectedSegmentIdx(segIdx);
     setSelectedTakeoffId(m.takeoffId);
+    setQuickMeasure(!m.takeoffId);
     if (m.takeoffId) {
       const takeoff = project?.takeoffs.find(t => t.id === m.takeoffId);
       if (takeoff) setSelectedColor(takeoff.color);
     } else {
       setSelectedColor(m.color);
     }
+  };
+
+  // The Measure button: start quick measuring with the Length tool, or stop.
+  const toggleQuickMeasure = () => {
+    if (quickMeasure) {
+      setQuickMeasure(false);
+      if (selectedMeasurement && !selectedMeasurement.takeoffId) {
+        setSelectedMeasurementId(null);
+        setSelectedSegmentIdx(null);
+      }
+      setCurrentTool('pan');
+      return;
+    }
+    if (readOnly) { handlePhoneToolBlocked(); return; }
+    if (!page?.scaleConfig) { setToolDisabledMessage('Please set the scale first to enable measurement tools.'); return; }
+    setSelectedTakeoffId(undefined);
+    setSelectedMeasurementId(null);
+    setSelectedSegmentIdx(null);
+    setQuickMeasure(true);
+    setShowQuickMeasurements(true);
+    setCurrentTool('length');
+  };
+
+  // A quick measurement joins a takeoff (the same as dragging it onto the
+  // takeoff in the sidebar) and from then on is priced with it.
+  const moveMeasurementToTakeoff = (m: Measurement, takeoffId: string) => {
+    const takeoff = project?.takeoffs.find(t => t.id === takeoffId);
+    if (!takeoff) return;
+    updateMeasurement(m.id, { takeoffId, color: takeoff.color });
+    setQuickMeasure(false);
+    setSelectedTakeoffId(takeoffId);
+    setSelectedColor(takeoff.color);
+    toast(`Moved to ${takeoff.name}`, { type: 'success' });
   };
 
   const openNewMeasurementModal = (takeoffId: string) => {
@@ -1397,7 +1453,10 @@ const CanvasViewInner: React.FC = () => {
   // The measurement's own type wins — a length measurement inside an area takeoff
   // should still lock the tool to length.
   const activeType = selectedMeasurement?.type ?? activeTakeoff?.type ?? null;
-  const hasNoSelection = !selectedTakeoffId && !selectedMeasurementId;
+  const hasNoSelection = !selectedTakeoffId && !selectedMeasurementId && !quickMeasure;
+  // The tool a selection locks drawing to. Quick measuring offers Length and
+  // Area whatever is selected (each drawing is its own measurement).
+  const lockedType = quickMeasure ? null : activeType;
   // The sidebar lists measurements from every page, but a cutout is drawn on
   // THIS page's canvas and PdfCanvas only ever sees this page's measurements —
   // so a cross-page selection would silently swallow the polygon.
@@ -1518,7 +1577,7 @@ const CanvasViewInner: React.FC = () => {
               onClick={() => setCurrentTool('length')}
               icon={<Ruler size={18} />}
               label="Length"
-              disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!activeType && activeType !== 'length')}
+              disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!lockedType && lockedType !== 'length')}
               onDisabledClick={() => {
                 if (readOnly) handlePhoneToolBlocked();
                 else if (!page.scaleConfig) setToolDisabledMessage("Please set the scale first to enable measurement tools.");
@@ -1531,7 +1590,7 @@ const CanvasViewInner: React.FC = () => {
               onClick={() => setCurrentTool('area')}
               icon={<Square size={18} />}
               label="Area"
-              disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!activeType && activeType !== 'area')}
+              disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!lockedType && lockedType !== 'area')}
               onDisabledClick={() => {
                 if (readOnly) handlePhoneToolBlocked();
                 else if (!page.scaleConfig) setToolDisabledMessage("Please set the scale first to enable measurement tools.");
@@ -1557,13 +1616,22 @@ const CanvasViewInner: React.FC = () => {
               onClick={() => setCurrentTool('count')}
               icon={<Hash size={18} />}
               label="Count"
-              disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!activeType && activeType !== 'count')}
+              disabled={readOnly || !page.scaleConfig || hasNoSelection || quickMeasure || (!!activeType && activeType !== 'count')}
               onDisabledClick={() => {
                 if (readOnly) handlePhoneToolBlocked();
                 else if (!page.scaleConfig) setToolDisabledMessage("Please set the scale first to enable measurement tools.");
+                else if (quickMeasure) setToolDisabledMessage("Quick measurements are lengths and areas. Select a takeoff to count.");
                 else if (hasNoSelection) setToolDisabledMessage("Select a measurement to enable drawing tools.");
                 else setToolDisabledMessage(`Tool is locked to ${activeType} for the selected item.`);
               }}
+            />
+            <ToolButton
+              active={quickMeasure}
+              onClick={toggleQuickMeasure}
+              icon={<RulerDimensionLine size={18} />}
+              label="Measure (not priced)"
+              disabled={readOnly || !page.scaleConfig}
+              onDisabledClick={() => readOnly ? handlePhoneToolBlocked() : setToolDisabledMessage('Please set the scale first to enable measurement tools.')}
             />
             <div className="h-8 w-px bg-edge mx-1" />
             <button
@@ -2098,7 +2166,7 @@ const CanvasViewInner: React.FC = () => {
                 icon={<Ruler size={20} />}
                 label="Length"
                 showLabel
-                disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!activeType && activeType !== 'length')}
+                disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!lockedType && lockedType !== 'length')}
                 onDisabledClick={() => {
                   if (readOnly) handlePhoneToolBlocked();
                   else if (!page.scaleConfig) setToolDisabledMessage("Please set the scale first to enable measurement tools.");
@@ -2113,7 +2181,7 @@ const CanvasViewInner: React.FC = () => {
                 icon={<Square size={20} />}
                 label="Area"
                 showLabel
-                disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!activeType && activeType !== 'area')}
+                disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!lockedType && lockedType !== 'area')}
                 onDisabledClick={() => {
                   if (readOnly) handlePhoneToolBlocked();
                   else if (!page.scaleConfig) setToolDisabledMessage("Please set the scale first to enable measurement tools.");
@@ -2143,13 +2211,24 @@ const CanvasViewInner: React.FC = () => {
                 icon={<Hash size={20} />}
                 label="Count"
                 showLabel
-                disabled={readOnly || !page.scaleConfig || hasNoSelection || (!!activeType && activeType !== 'count')}
+                disabled={readOnly || !page.scaleConfig || hasNoSelection || quickMeasure || (!!activeType && activeType !== 'count')}
                 onDisabledClick={() => {
                   if (readOnly) handlePhoneToolBlocked();
                   else if (!page.scaleConfig) setToolDisabledMessage("Please set the scale first to enable measurement tools.");
+                  else if (quickMeasure) setToolDisabledMessage("Quick measurements are lengths and areas. Select a takeoff to count.");
                   else if (hasNoSelection) setToolDisabledMessage("Select a measurement to enable drawing tools.");
                   else setToolDisabledMessage(`Tool is locked to ${activeType} for the selected item.`);
                 }}
+              />
+              <ToolButton
+                testId="tool-quick-measure"
+                showLabel
+                active={quickMeasure}
+                onClick={toggleQuickMeasure}
+                icon={<RulerDimensionLine size={20} />}
+                label="Measure (not priced)"
+                disabled={readOnly || !page.scaleConfig}
+                onDisabledClick={() => readOnly ? handlePhoneToolBlocked() : setToolDisabledMessage('Please set the scale first to enable measurement tools.')}
               />
               <div className="h-6 w-px bg-edge mx-0.5 md:mx-1 flex-shrink-0" />
               <ToolButton
@@ -2222,7 +2301,7 @@ const CanvasViewInner: React.FC = () => {
             currentTool={currentTool}
             searchTerm={searchTerm}
             scaleConfig={page.scaleConfig}
-            measurements={page.measurements}
+            measurements={showQuickMeasurements ? page.measurements : page.measurements.filter(m => m.takeoffId)}
             pageMeasurements={page.measurements}
             takeoffs={project.takeoffs}
             takeoffCostTotals={costTotals}
@@ -2243,6 +2322,7 @@ const CanvasViewInner: React.FC = () => {
               else { setSelectedMeasurementId(id); setSelectedSegmentIdx(null); }
             }}
             onSelectSegment={selectMeasurementSegment}
+            quickMeasure={quickMeasure}
             resumeMeasurement={resumeMeasurement}
             resumeSegmentIdx={resumeSegmentIdx}
             onMeasurementResumed={() => { setResumeMeasurement(null); setResumeSegmentIdx(-1); }}
@@ -2384,6 +2464,12 @@ const CanvasViewInner: React.FC = () => {
         handleMergeSelected={handleMergeSelected}
         openNewMeasurementModal={openNewMeasurementModal}
         toast={toast}
+        quickMeasure={quickMeasure}
+        onToggleQuickMeasure={toggleQuickMeasure}
+        canQuickMeasure={!readOnly && !!page.scaleConfig}
+        showQuickMeasurements={showQuickMeasurements}
+        setShowQuickMeasurements={setShowQuickMeasurements}
+        onMoveToTakeoff={moveMeasurementToTakeoff}
       />
 
       {/* Scale Modal */}

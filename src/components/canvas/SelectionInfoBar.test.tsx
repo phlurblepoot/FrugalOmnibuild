@@ -44,7 +44,7 @@ describe('SelectionInfoBar', () => {
     const total = screen.getByTestId('selection-info-total');
     expect(total).toHaveTextContent(`Measurement total160.00 sq ftLength: 10' - 0"`);
     expect(total).not.toHaveTextContent('$');
-    expect(screen.getByText('Ungrouped')).toBeInTheDocument();
+    expect(screen.getByText('Quick measurement')).toBeInTheDocument();
   });
 
   it('a count marker: its price and how many are on the page', () => {

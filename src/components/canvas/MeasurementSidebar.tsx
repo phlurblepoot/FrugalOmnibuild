@@ -1,9 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Edit2, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Search, GitMerge } from 'lucide-react';
+import { Plus, Edit2, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, Search, GitMerge, RulerDimensionLine, Eye, EyeOff } from 'lucide-react';
 import { Measurement, ScaleConfig, Tool, Project, ProjectPage, MeasurementTakeoff } from '../../types';
 import { formatRealValue } from '../../utils/math';
 import { MeasurementItem } from './MeasurementItem';
+import { QUICK_MEASURE_COLOR } from '../../utils/quickMeasure';
 import { multipliersMatch } from '../../utils/multiplier';
 
 type TakeoffTotal = MeasurementTakeoff & { totalRealValue: number; measurementsCount: number };
@@ -51,7 +52,21 @@ interface MeasurementSidebarProps {
   openNewMeasurementModal: (takeoffId: string) => void;
 
   toast: (message: string, options?: { type?: 'info' | 'success' | 'warning' | 'error' }) => void;
+
+  /** Quick measurements: measurements with no takeoff, never priced. */
+  quickMeasure: boolean;
+  onToggleQuickMeasure: () => void;
+  /** False on read-only pages and before the scale is set. */
+  canQuickMeasure: boolean;
+  showQuickMeasurements: boolean;
+  setShowQuickMeasurements: React.Dispatch<React.SetStateAction<boolean>>;
+  onMoveToTakeoff: (m: Measurement, takeoffId: string) => void;
 }
+
+// The takeoffs a quick measurement can join: an area joins an area takeoff; a
+// line joins a length takeoff, or an area one as a wall run (surface area).
+const moveTargetsFor = (m: Measurement, takeoffs: MeasurementTakeoff[]): MeasurementTakeoff[] =>
+  takeoffs.filter(t => (m.type === 'area' ? t.type === 'area' : m.type === 'length' && (t.type === 'length' || t.type === 'area')));
 
 export function MeasurementSidebar({
   project,
@@ -85,6 +100,12 @@ export function MeasurementSidebar({
   handleMergeSelected,
   openNewMeasurementModal,
   toast,
+  quickMeasure,
+  onToggleQuickMeasure,
+  canQuickMeasure,
+  showQuickMeasurements,
+  setShowQuickMeasurements,
+  onMoveToTakeoff,
 }: MeasurementSidebarProps) {
   return (
     <>
@@ -429,38 +450,65 @@ export function MeasurementSidebar({
               );
             })()}
 
-            {/* Ungrouped Measurements */}
-            {sidebarPages.flatMap(p => p.measurements)
-              .filter(m => !m.takeoffId && (!measurementFilter || m.name.toLowerCase().includes(measurementFilter.toLowerCase()))).length > 0 && (
-              <div
-                className={`mb-4 bg-raised border rounded-xl overflow-hidden shadow-sm transition-colors flex-shrink-0 ${!selectedTakeoffId ? 'border-accent-500 ring-1 ring-accent-500' : 'border-edge'}`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.classList.add('ring-2', 'ring-accent-400', 'ring-inset');
-                }}
-                onDragLeave={(e) => {
-                  e.currentTarget.classList.remove('ring-2', 'ring-accent-400', 'ring-inset');
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.classList.remove('ring-2', 'ring-accent-400', 'ring-inset');
-                  const measurementId = e.dataTransfer.getData('text/plain');
-                  if (measurementId) {
-                    updateMeasurement(measurementId, { takeoffId: undefined });
-                  }
-                }}
-              >
+            {/* Quick measurements: no takeoff, never priced or totalled. Always
+                listed (empty too) so the Measure button is easy to find. */}
+            {(() => {
+              const quick = sidebarPages.flatMap(p => p.measurements
+                .filter(m => !m.takeoffId && (!measurementFilter || m.name.toLowerCase().includes(measurementFilter.toLowerCase())))
+                .map(m => ({ m, p })));
+              if (measurementFilter && quick.length === 0) return null;
+              return (
                 <div
-                  className={`px-3 py-2 border-b cursor-pointer transition-colors ${!selectedTakeoffId ? 'bg-accent-50 dark:bg-accent-900/20 border-accent-100 dark:border-accent-800/30' : 'bg-sunken border-edge hover:bg-hover/50'}`}
-                  onClick={() => setSelectedTakeoffId(null)}
+                  data-testid="quick-measurements"
+                  className={`mb-4 bg-raised border rounded-xl overflow-hidden shadow-sm transition-colors flex-shrink-0 ${quickMeasure ? 'border-fuchsia-500 ring-1 ring-fuchsia-500' : 'border-edge'}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.add('ring-2', 'ring-accent-400', 'ring-inset');
+                  }}
+                  onDragLeave={(e) => {
+                    e.currentTarget.classList.remove('ring-2', 'ring-accent-400', 'ring-inset');
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('ring-2', 'ring-accent-400', 'ring-inset');
+                    const measurementId = e.dataTransfer.getData('text/plain');
+                    if (measurementId) {
+                      updateMeasurement(measurementId, { takeoffId: undefined, color: QUICK_MEASURE_COLOR });
+                    }
+                  }}
                 >
-                  <span className={`text-sm font-semibold ${!selectedTakeoffId ? 'text-accent-800 dark:text-accent-300' : 'text-ink'}`}>Ungrouped</span>
-                </div>
-                <div className="divide-y divide-edge min-h-[10px]">
-                  {sidebarPages.flatMap(p =>
-                    p.measurements
-                      .filter(m => !m.takeoffId)
-                      .map(m => (
+                  <div className={`px-3 py-2 border-b flex items-center gap-2 ${quickMeasure ? 'bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-100 dark:border-fuchsia-800/30' : 'bg-sunken border-edge'}`}>
+                    <RulerDimensionLine size={15} className="shrink-0 text-fuchsia-600 dark:text-fuchsia-400" />
+                    <span className="text-sm font-semibold text-ink">Quick measurements</span>
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-ink-faint">Not priced</span>
+                    <div className="ml-auto flex items-center gap-1">
+                      <button
+                        data-testid="quick-visibility"
+                        onClick={() => setShowQuickMeasurements(v => !v)}
+                        className="p-1 rounded-md text-ink-faint hover:text-ink hover:bg-hover transition-colors"
+                        title={showQuickMeasurements ? 'Hide quick measurements on the plan' : 'Show quick measurements on the plan'}
+                        aria-pressed={!showQuickMeasurements}
+                      >
+                        {showQuickMeasurements ? <Eye size={15} /> : <EyeOff size={15} />}
+                      </button>
+                      {(canQuickMeasure || quickMeasure) && (
+                        <button
+                          data-testid="quick-measure-toggle"
+                          onClick={onToggleQuickMeasure}
+                          className="text-xs flex items-center gap-1 font-medium px-2 py-1 rounded-md text-accent-600 dark:text-accent-400 hover:bg-hover transition-colors"
+                        >
+                          {quickMeasure ? 'Done' : <><Plus size={13} /> Measure</>}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {quick.length === 0 ? (
+                    <p className="px-3 py-2.5 text-xs text-ink-faint">
+                      Measure lengths and areas without pricing them. They show on the plan for everyone, but never count in totals or proposals.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-edge min-h-[10px]">
+                      {quick.map(({ m, p }) => (
                         <MeasurementItem
                           key={m.id}
                           testId="measurement-row"
@@ -471,19 +519,21 @@ export function MeasurementSidebar({
                           selected={selectedMeasurementId === m.id}
                           onSelect={() => selectMeasurement(m)}
                           onRename={(newName) => updateMeasurement(m.id, { name: newName }, p.id)}
-                          onEditHeights={() => setHeightsModalMeasurementId(m.id)}
                           onEditMultiplier={() => onEditMultiplier(m.id)}
+                          moveTargets={moveTargetsFor(m, project.takeoffs)}
+                          onMoveToTakeoff={(takeoffId) => onMoveToTakeoff(m, takeoffId)}
                           pageName={showCurrentPageOnly ? undefined : p.name}
                           pageId={p.id}
                           projectId={project.id}
                           planSetName={m.planSetId ? project.planSets?.find(ps => ps.id === m.planSetId)?.name : undefined}
-                          pageIds={project.pages.filter(pg => pg.measurements.some(m => !m.takeoffId)).map(pg => pg.id)}
+                          pageIds={project.pages.filter(pg => pg.measurements.some(mm => !mm.takeoffId)).map(pg => pg.id)}
                         />
-                      ))
+                      ))}
+                    </div>
                   )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {sidebarPages.flatMap(p => p.measurements).length === 0 && (
               <p className="text-sm text-ink-soft italic text-center py-4">No measurements yet.</p>
