@@ -248,7 +248,7 @@ The server reads a `.env` file in the working folder if there is one. Every vari
 
 **AI sheet reading** (Claude; see [docs/ai-sheet-reading-runbook.md](docs/ai-sheet-reading-runbook.md))
 
-Connect Claude in **Settings → User Preferences → AI Sheet Reading**; no variables are needed. Without it, sheet names come from page labels and OCR.
+Connect Claude in **Settings → User Preferences → AI Sheet Reading**; no variables are needed. A Claude subscription token is for your own private install; use an API key for anything shared more widely. Without it, sheet names come from page labels and OCR.
 
 | Variable | What it does |
 |---|---|

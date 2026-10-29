@@ -61,7 +61,7 @@ export const RELEASES: WhatsNewRelease[] = [
         id: 'claude-connect', kind: 'new', area: 'Settings', title: 'Connect Claude once, in Settings',
         body: 'An admin connects Claude for everyone under Settings › User Preferences › AI Sheet Reading.',
         points: [
-          'Use your Claude Pro or Max plan: run claude setup-token on any computer with Claude Code and paste the token. Or paste an API key from platform.claude.com.',
+          'For your own private install, use your Claude Pro or Max plan: run claude setup-token on any computer with Claude Code and paste the token. For anything shared more widely, paste an API key from platform.claude.com instead.',
           'Pick the model: Opus 5.5 reads small print best, Haiku 5.5 is fastest. Test connection checks it works.',
           'The token is stored encrypted and never shown again. When Claude reads a page, the page image and its text are sent to Anthropic.',
         ],

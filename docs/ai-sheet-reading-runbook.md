@@ -30,7 +30,7 @@ at a time, so a 200-page set does not trip rate limits.
 Open **Settings → User Preferences → AI Sheet Reading**. Choose one way to
 connect.
 
-### A. Your Claude subscription (Pro or Max)
+### A. Your Claude subscription (Pro or Max), for your own private install
 
 1. On any computer with [Claude Code](https://code.claude.com/docs) installed,
    run:
@@ -57,9 +57,14 @@ Reading counts against your plan's usage limits, like using Claude yourself.
 When you hit the limit, AI Scan says so, and the pages keep their names until
 you try again later.
 
-You can switch to an API key at any time; nothing else changes.
+This is for your own private install. If the app is ever shared more widely,
+use an API key (B) instead: Disconnect, paste the key, and nothing else
+changes.
 
 ### B. An API key
+
+Use this for anything shared more widely.
+
 
 1. Create a key at [platform.claude.com](https://platform.claude.com/settings/keys).
 2. Choose **API key**, paste it, click **Connect**, then **Test connection**.

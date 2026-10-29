@@ -180,11 +180,11 @@ export const ClaudeAiCard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
                 </div>
                 {kind === 'token' ? (
                   <div className="text-sm text-ink-soft space-y-1.5">
-                    <p>On any computer with Claude Code installed, run <Code>claude setup-token</Code>, sign in with your Claude account, and paste the token it prints. It lasts a year and uses your plan’s limits.</p>
+                    <p>On any computer with Claude Code installed, run <Code>claude setup-token</Code>, sign in with your Claude account, and paste the token it prints. It lasts a year and uses your plan’s limits. This is for your own private install; for anything shared more widely, use an API key.</p>
                     <p className="text-xs">No other computer? Run it on the server: <Code>docker exec -it &lt;container&gt; claude setup-token</Code> (your container’s name, e.g. plan-takeoff-app). Or sign the server in for good with <Code>docker exec -it &lt;container&gt; claude login</Code>; that sign-in is kept in the data folder and shows up here by itself.</p>
                   </div>
                 ) : (
-                  <p className="text-sm text-ink-soft">Create a key at <a className="text-accent-600 hover:underline" href="https://platform.claude.com/settings/keys" target="_blank" rel="noreferrer">platform.claude.com</a> and paste it here. Each sheet Claude reads is billed to that account.</p>
+                  <p className="text-sm text-ink-soft">Create a key at <a className="text-accent-600 hover:underline" href="https://platform.claude.com/settings/keys" target="_blank" rel="noreferrer">platform.claude.com</a> and paste it here. Each sheet Claude reads is billed to that account. Use this for anything shared more widely; it is a drop-in switch from a subscription token.</p>
                 )}
                 <div className="flex flex-col sm:flex-row gap-2">
                   <label htmlFor="claude-secret" className="sr-only">{kind === 'token' ? 'Claude Code token' : 'API key'}</label>

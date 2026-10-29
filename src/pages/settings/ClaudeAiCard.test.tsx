@@ -68,6 +68,7 @@ describe('ClaudeAiCard', () => {
     expect(await screen.findByText('Not connected')).toBeInTheDocument();
     expect(screen.getByText('claude setup-token', { selector: 'code' })).toBeInTheDocument();
     expect(screen.getByText(/plan’s usage limits/)).toBeInTheDocument();
+    expect(screen.getByText(/for your own private install; for anything shared more widely, use an API key/)).toBeInTheDocument();
     const input = screen.getByLabelText('Claude Code token');
     expect(input).toHaveAttribute('type', 'password');
     fireEvent.change(input, { target: { value: 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyzWXYZ' } });
@@ -85,6 +86,7 @@ describe('ClaudeAiCard', () => {
     fireEvent.click(await screen.findByRole('radio', { name: 'API key' }));
     expect(screen.getByLabelText('API key')).toBeInTheDocument();
     expect(screen.getByText(/3¢ on Opus, 1.5¢ on Sonnet, 0.1¢ on Haiku/)).toBeInTheDocument();
+    expect(screen.getByText(/Use this for anything shared more widely/)).toBeInTheDocument();
   });
 
   it('shows a server-side rejection of the paste', async () => {

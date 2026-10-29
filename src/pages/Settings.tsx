@@ -32,6 +32,13 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.0.1',
+    date: 'October 29, 2026',
+    changes: [
+      'AI sheet reading: Settings and the setup guide now say the Claude subscription sign-in is for your own private install, and that an API key is the one to use for anything shared more widely (a drop-in switch).',
+    ],
+  },
+  {
     version: '4.8.0',
     date: 'October 29, 2026',
     changes: [
