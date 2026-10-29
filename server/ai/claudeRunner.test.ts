@@ -141,6 +141,17 @@ describe('createClaudeRunner', () => {
     await expect(r.readSheet({ image: JPEG })).rejects.toMatchObject({ code: 'timeout' });
   });
 
+  it('a call that ends quietly after the abort is still a timeout', async () => {
+    const r = createClaudeRunner({
+      store: store(),
+      timeoutMs: 20,
+      queryFn: async function* ({ options }) {
+        await new Promise(res => options!.abortController!.signal.addEventListener('abort', res));
+      },
+    });
+    await expect(r.readSheet({ image: JPEG })).rejects.toMatchObject({ code: 'timeout' });
+  });
+
   it('a call that times out while the CLI retries a 429 reports the rate limit', async () => {
     const r = createClaudeRunner({
       store: store(),

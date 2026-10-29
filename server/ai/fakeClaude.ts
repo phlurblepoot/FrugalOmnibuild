@@ -25,10 +25,14 @@ export function createFakeClaudeQuery(): QueryFn {
     }
     let answer: string;
     if (/"sheetNumber"/.test(text)) {
-      sheet += 1;
+      // A sheet number and title in the PDF text ("A-201 EXTERIOR ELEVATIONS")
+      // are read back; otherwise pages count up from A-101 as "Floor Plan".
       // The title says whether the title-block close-up came along with the page.
-      const sheetTitle = images >= 2 ? 'Floor Plan' : 'Floor Plan (no close-up)';
-      answer = JSON.stringify({ sheetNumber: `A-${sheet}`, sheetTitle, discipline: 'Architectural', confidence: 0.95 });
+      const found = /\b([A-Z]{1,2}-\d{3})\s+([A-Z][A-Z ]*?(?:PLAN|ELEVATIONS|SECTIONS|DETAILS))\b/.exec(text);
+      const sheetNumber = found ? found[1] : `A-${++sheet}`;
+      const title = found ? found[2].toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Floor Plan';
+      const sheetTitle = images >= 2 ? title : `${title} (no close-up)`;
+      answer = JSON.stringify({ sheetNumber, sheetTitle, discipline: 'Architectural', confidence: 0.95 });
     } else if (/"matchSheetId"/.test(text)) {
       answer = JSON.stringify({ matchSheetId: 'new', confidence: 0.9, reason: 'fake' });
     } else if (/"text"/.test(text)) {

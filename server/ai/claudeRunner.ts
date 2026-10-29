@@ -148,14 +148,16 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
         }
       }
     } catch (e: any) {
-      if (abortController.signal.aborted) {
-        const code = retryError ? classifyClaudeError(retryError, '') : 'timeout';
-        throw new ClaudeAiError(code === 'other' ? 'timeout' : code, MESSAGES[code === 'other' ? 'timeout' : code]);
-      }
       // A single-shot query throws after an error result; keep the result's text.
-      if (answer === null) failure = failure || String(e?.message ?? e);
+      if (answer === null && !abortController.signal.aborted) failure = failure || String(e?.message ?? e);
     } finally {
       clearTimeout(timer);
+    }
+    if (answer === null && abortController.signal.aborted) {
+      // Timed out; if the CLI was retrying a 429 or an overload, say that instead.
+      const retried = retryError ? classifyClaudeError(retryError, '') : 'other';
+      const code = retried === 'other' ? 'timeout' : retried;
+      throw new ClaudeAiError(code, MESSAGES[code]);
     }
     if (answer !== null && !apiError) return answer;
     const code = classifyClaudeError(apiError, failure);

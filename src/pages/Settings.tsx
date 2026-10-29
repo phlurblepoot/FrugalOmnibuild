@@ -32,6 +32,17 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.0',
+    date: 'October 29, 2026',
+    changes: [
+      'New: Claude reads your plan sheets. On the Name Pages screen, AI Scan has Claude fill in each page\'s sheet number and title from its title block, and on a revised set pick the sheet each new page replaces. The extract tool\'s AI read has Claude read just the box you draw.',
+      'An admin connects Claude once, under Settings › User Preferences › AI Sheet Reading: with a Claude Pro or Max plan (paste a token from `claude setup-token`) or an API key from platform.claude.com, and picks Opus 5.5, Sonnet 5.5 or Haiku 5.5. The token or key is stored encrypted and never shown again. When Claude reads a page, the page image and its text are sent to Anthropic.',
+      'Without Claude, page naming works as before, from the PDF\'s text and OCR. When a read fails (sign-in, usage limit), the app says why and the pages keep their names.',
+      'The GPU image (:cuda, :cuda-stable) and its local model are retired. On Unraid, switch the container to the regular :testing or :main image.',
+      'A "What\'s new" tour for 4.8. Version 4.8 brings together 4.7.0.1.',
+    ],
+  },
+  {
     version: '4.7.0.1',
     date: 'October 29, 2026',
     changes: [

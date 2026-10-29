@@ -47,3 +47,21 @@ describe('the 4.7 pages', () => {
     }
   });
 });
+
+describe('the 4.8 pages', () => {
+  const r = RELEASES.find(x => x.version === '4.8')!;
+
+  it('is Claude reading plan sheets, and how to connect it', () => {
+    expect(r.pages.map(p => p.id)).toEqual(['claude-reads', 'claude-connect']);
+    expect(r.pages.find(p => p.id === 'claude-connect')!.action).toEqual({ label: 'Open Settings', to: '/settings' });
+  });
+
+  it('has every picture it names, in light and dark', () => {
+    for (const p of r.pages) {
+      for (const s of p.shots) {
+        expect(existsSync(join('public', 'whats-new', r.version, s.file)), s.file).toBe(true);
+        if (s.dark) expect(existsSync(join('public', 'whats-new', r.version, s.file.replace('.webp', '-dark.webp'))), s.file).toBe(true);
+      }
+    }
+  });
+});

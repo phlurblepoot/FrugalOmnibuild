@@ -41,6 +41,36 @@ export interface WhatsNewRelease {
 
 export const RELEASES: WhatsNewRelease[] = [
   {
+    version: '4.8',
+    intro: {
+      title: 'Welcome to FrugalOmnibuild 4.8',
+      body: 'Claude now reads your plan sheets: the sheet number and title of every page, and which sheet a revised page replaces. Two pages: what it does, and how an admin connects it.',
+    },
+    pages: [
+      {
+        id: 'claude-reads', kind: 'new', area: 'Plan sets', title: 'Claude reads your plan sheets',
+        body: 'When you upload a plan set, click AI Scan on the Name Pages screen and Claude fills in each page’s sheet number and title from its title block. On a revised set it also picks the sheet each new page replaces.',
+        points: [
+          'Check the names, fix any it got wrong, then Finish.',
+          'Draw a box with the extract tool and pick AI read to have Claude read just that box on every page.',
+          'Without Claude, naming works as before, from the PDF’s text and OCR. If a read fails, it says why and the pages keep their names.',
+        ],
+        shots: [{ file: 'ai-scan.webp', dark: true, caption: 'A new plan set after AI Scan: every page has its sheet number and title.' }],
+      },
+      {
+        id: 'claude-connect', kind: 'new', area: 'Settings', title: 'Connect Claude once, in Settings',
+        body: 'An admin connects Claude for everyone under Settings › User Preferences › AI Sheet Reading.',
+        points: [
+          'Use your Claude Pro or Max plan: run claude setup-token on any computer with Claude Code and paste the token. Or paste an API key from platform.claude.com.',
+          'Pick the model: Opus 5.5 reads small print best, Haiku 5.5 is fastest. Test connection checks it works.',
+          'The token is stored encrypted and never shown again. When Claude reads a page, the page image and its text are sent to Anthropic.',
+        ],
+        shots: [{ file: 'connect.webp', dark: true, caption: 'Claude connected with a subscription token, tested, on Opus 5.5.' }],
+        action: { label: 'Open Settings', to: '/settings' },
+      },
+    ],
+  },
+  {
     version: '4.7',
     intro: {
       title: 'Welcome to FrugalOmnibuild 4.7',

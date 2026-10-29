@@ -35,6 +35,8 @@ export default defineConfig({
       DEMO_DATA_DIR: DATA_DIR,
       PORT: String(PORT),
       MAIL_FAKE_PROVIDER: '1',
+      // Claude's sheet reading answers from a canned responder (server/ai/fakeClaude.ts).
+      AI_FAKE_CLAUDE: '1',
       APP_PUBLIC_URL: `http://localhost:${PORT}`,
     },
   },
