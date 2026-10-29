@@ -10,7 +10,7 @@ import { Link, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ArrowLeft, ArrowUpFromLine, Box, Circle, Combine, Eye, EyeOff, FileDown, FlipHorizontal2, ListOrdered, LoaderCircle, Magnet, Maximize,
-  ImagePlus, MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, Trash2, TriangleRight, Undo2,
+  ImagePlus, MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, SquareRoundCorner, Trash2, TriangleRight, Undo2,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
@@ -31,9 +31,10 @@ import {
 } from './sketchSnap';
 import {
   circleClick, circleTyped, draftLastPoint, draftPreview, lineBack, lineClick, lineFinish, lineTyped, rectClick, rectTyped,
-  type Draft, type Step, type ToolId,
+  toggleEdge, toggleFaceEdges, type Draft, type PickedEdge, type Step, type ToolId,
 } from './sketchTools';
-import { SketchScene, viewForPlane, type Pick, type ViewName } from './sketchScene';
+import { edgeLine, edgeRefPoint } from './sketchEdges';
+import { SketchScene, viewForPlane, type EdgeSource, type Pick, type ViewName } from './sketchScene';
 import { buildSolids, projectViews } from './geometryClient';
 import type { ViewSpec } from './geometryTypes';
 import { SketchExportModal, type ExportOptions } from './SketchExportModal';
@@ -66,6 +67,7 @@ const TOOL_HINTS: Record<ToolId, string> = {
   move: 'Click a solid, then the point to move it from and the point to move it to (or type how far). Copies leaves it where it is and makes that many.',
   rotate: 'Click a solid, then the point to turn it round (on the plane you draw on), then click or type the angle. Copies leaves it and makes that many.',
   mirror: 'Click a solid, then two points on the mirror line (on the plane you draw on).',
+  edges: 'Click the edges of a solid to round or bevel (or a face for all the edges round it), then type the size and press Enter.',
 };
 const SOLID_TOOLS: ToolId[] = ['combine', 'move', 'rotate', 'mirror'];
 const EMPTY_PLAN: SolidPlan = { solids: [], skipped: new Map() };
@@ -73,6 +75,10 @@ type ScenePreviewAngle = { plane: SketchPlane; at: Vec2; levelDeg: number; dirDe
 const FACE_PICK_HINT = 'Click a flat face of a solid to draw on it.';
 const ANGLE_STEP_DEG = 15;
 const PERSPECTIVE_KEY = 'sketch-perspective';
+/** The id of the rounding being tried out, until it is made a step. */
+const EDGE_PREVIEW_ID = 'edges-preview';
+/** How near (screen px) the pointer must be to an edge to pick it: a fingertip covers more than a pointer. */
+const edgeSlop = (pointerType: string) => (pointerType === 'touch' ? 22 : pointerType === 'pen' ? 12 : 8);
 
 const readPerspective = () => { try { return localStorage.getItem(PERSPECTIVE_KEY) === '1'; } catch { return false; } };
 
@@ -233,6 +239,10 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const [combineMode, setCombineMode] = useState<'join' | 'cut'>('join');
   const [copiesText, setCopiesText] = useState('0');
   const [mirrorKeep, setMirrorKeep] = useState(true);
+  // Round or bevel (Round tool), and the size used last (offered again next time).
+  const [edgeMode, setEdgeMode] = useState<'round' | 'bevel'>('round');
+  const lastEdgeSize = useRef('');
+  const pointerType = useRef('mouse');
   const [photoPicker, setPhotoPicker] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   // The step list starts open on wide screens.
@@ -265,21 +275,41 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refFileIds]);
   const [engine, setEngine] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
-  const [buildErrors, setBuildErrors] = useState<string[]>([]);
+  const [buildErrors, setBuildErrors] = useState<{ featureId: string; message: string }[]>([]);
+  // Why the rounding being tried out cannot be made (and for which try).
+  const [previewError, setPreviewError] = useState<{ key: string; message: string } | null>(null);
   const buildSeq = useRef(0);
+  // While edges are being rounded, the solids show the rounding as it would be.
+  const previewFeature = useMemo(() => {
+    if (!doc || draft?.tool !== 'edges' || !draft.picks.length) return null;
+    const size = parseLength(typed[0], doc.units);
+    if (!size || size <= 0) return null;
+    return { id: EDGE_PREVIEW_ID, type: 'edges' as const, mode: edgeMode, targetId: draft.solidId, points: draft.picks.map(p => p.point), size };
+  }, [doc, draft, typed, edgeMode]);
+  const previewKey = previewFeature ? JSON.stringify(previewFeature) : '';
   useEffect(() => {
     if (!doc) return;
     if (doc.features.length === 0) { setSolids([]); setBuildErrors([]); return; }
     const seq = ++buildSeq.current;
-    setEngine(e => (e === 'ready' ? e : 'loading'));
-    buildSolids(doc).then(r => {
-      if (seq !== buildSeq.current) return;
-      if (r.fatal) { setEngine('failed'); setBuildErrors([r.fatal]); return; }
-      setEngine('ready');
-      setSolids(r.solids);
-      setBuildErrors(r.errors.map(e => e.message));
-    });
-  }, [doc]);
+    const run = () => {
+      setEngine(e => (e === 'ready' ? e : 'loading'));
+      buildSolids(previewFeature ? { ...doc, features: [...doc.features, previewFeature] } : doc).then(r => {
+        if (seq !== buildSeq.current) return;
+        if (r.fatal) { setEngine('failed'); setBuildErrors([{ featureId: '', message: r.fatal }]); return; }
+        setEngine('ready');
+        setSolids(r.solids);
+        setBuildErrors(r.errors.filter(e => e.featureId !== EDGE_PREVIEW_ID));
+        const tryErr = r.errors.find(e => e.featureId === EDGE_PREVIEW_ID);
+        setPreviewError(tryErr ? { key: previewKey, message: tryErr.message } : null);
+      });
+    };
+    // A size being typed is tried once the typing pauses.
+    if (!previewFeature) { run(); return; }
+    const timer = setTimeout(run, 150);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, previewKey]);
+  const buildErrorMap = useMemo(() => new Map(buildErrors.map(e => [e.featureId, e.message])), [buildErrors]);
 
   // ── Scene ─────────────────────────────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null);
@@ -303,7 +333,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       selectedRefId: selection && 'refId' in selection ? selection.refId : null,
       // The solid a Join/Cut, Move, Rotate or Mirror is working on.
       activeSolidId: draft?.tool === 'combine' ? draft.targetId
-        : draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror' ? draft.solidId : null,
+        : draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror' || draft?.tool === 'edges' ? draft.solidId : null,
       selectedShapeId: selection && 'shapeId' in selection ? selection.shapeId : null,
       selectedFeatureId: selection && 'featureId' in selection ? selection.featureId : null,
     });
@@ -340,8 +370,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     // a solid picked before Join/Cut, Move, Rotate or Mirror is the one it works on.
     if (preselected && t === 'spin') startSpin(preselected);
     if (preselected && t === 'run') startRun(preselected);
-    const solid = SOLID_TOOLS.includes(t) ? selectedSolid() : null;
-    if (solid) startSolidTool(t, solid);
+    const solid = SOLID_TOOLS.includes(t) || t === 'edges' ? selectedSolid() : null;
+    if (solid && t === 'edges') startEdges(solid, []);
+    else if (solid) startSolidTool(t, solid);
   };
 
   const setPlane = (p: PlaneId) => {
@@ -562,6 +593,13 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       });
       return;
     }
+    if (tool === 'edges') {
+      const d = draft?.tool === 'edges' ? draft : null;
+      const hit = ptr ? scene.pickEdge(ptr.x, ptr.y, edgeSlop(pointerType.current), edgeSources(d)) : null;
+      const picked = !!d && !!hit && hit.solidId === d.solidId && d.picks.some(p => p.index === hit.index);
+      scene.setPreview({ ...none, edges: { picked: d?.picks.map(p => p.line) ?? [], hover: hit && !picked ? hit.line : null } });
+      return;
+    }
     if (draft?.tool === 'photo-scale' || draft?.tool === 'photo-move') {
       const raw = ptr ? scene.planePoint(ptr.x, ptr.y, plane) : null;
       if (raw) hover.current = raw;
@@ -654,6 +692,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const stepBack = () => {
     const d = draftRef.current;
     if (!d) return;
+    // Rounding: the last edge picked is left out again (the size stays).
+    if (d.tool === 'edges') { setDraft(d.picks.length > 1 ? { ...d, picks: d.picks.slice(0, -1) } : null); return; }
     setTyped(['', '']);
     setDraft(d.tool === 'line' ? lineBack(d) : null);
   };
@@ -765,6 +805,63 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     else if (t === 'move') setDraft({ tool: 'move', solidId });
     else if (t === 'rotate') setDraft({ tool: 'rotate', solidId });
     else if (t === 'mirror') setDraft({ tool: 'mirror', solidId });
+    setSelection(null);
+  };
+
+  /** Round or bevel a solid's edges, starting with these picks (of its edges as they are now). */
+  const startEdges = (solidId: string, picks: PickedEdge[]) => {
+    const mesh = solids.find(m => m.solidId === solidId);
+    if (!mesh) return;
+    setDraft({ tool: 'edges', solidId, picks, base: { solidId, edges: mesh.edges, edgeRuns: mesh.edgeRuns } });
+    setTyped([lastEdgeSize.current, '']);
+    setSelection(null);
+  };
+
+  /** The edges the Round tool picks from: once one is picked, the same solid's only. The solid being
+   *  rounded always gives the edges it had before the rounding shown, which are the ones kept. */
+  const edgeSources = (d: Draft | null): EdgeSource[] => {
+    if (d?.tool !== 'edges') return solids;
+    return d.picks.length ? [d.base] : solids.map(m => (m.solidId === d.solidId ? d.base : m));
+  };
+
+  /** A click with the Round tool: an edge picks it (or leaves it out again); a face picks the edges round it. */
+  const edgesClick = (clientX: number, clientY: number) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const d = draftRef.current?.tool === 'edges' ? draftRef.current : null;
+    const sources = edgeSources(d);
+    const hit = scene.pickEdge(clientX, clientY, edgeSlop(pointerType.current), sources);
+    if (hit) {
+      const edge = { index: hit.index, point: hit.point, line: hit.line };
+      if (d && d.solidId === hit.solidId) setDraft({ ...d, picks: toggleEdge(d.picks, edge) });
+      else startEdges(hit.solidId, [edge]);
+      return;
+    }
+    const face = scene.faceEdgesAt(clientX, clientY, sources);
+    if (face?.edges.length) {
+      const src = sources.find(x => x.solidId === face.solidId)!;
+      const edges = face.edges.map(index => { const line = edgeLine(src, index); return { index, point: edgeRefPoint(line), line }; });
+      if (d && d.solidId === face.solidId) setDraft({ ...d, picks: toggleFaceEdges(d.picks, edges) });
+      else startEdges(face.solidId, edges);
+      return;
+    }
+    if (!d?.picks.length) toast('Click an edge of a solid, or a face for all the edges round it.', { type: 'info' });
+  };
+
+  const commitEdges = () => {
+    const d = draftRef.current;
+    if (!doc || d?.tool !== 'edges') return;
+    if (!d.picks.length) { toast('Click the edges to round first.', { type: 'info' }); return; }
+    const size = parseLength(typed[0], doc.units);
+    if (!size || size <= 0) {
+      toast(`Type the ${edgeMode === 'round' ? 'radius' : 'size'}, e.g. ${doc.units === 'metric' ? '5' : '1/4'}.`, { type: 'warning' });
+      return;
+    }
+    if (previewFeature && previewError?.key === previewKey) { toast(previewError.message, { type: 'warning' }); return; }
+    lastEdgeSize.current = typed[0];
+    commitDoc({ ...doc, features: [...doc.features, { id: uuidv4(), type: 'edges', mode: edgeMode, targetId: d.solidId, points: d.picks.map(p => p.point), size }] });
+    setDraft(null);
+    setTyped(['', '']);
     setSelection(null);
   };
 
@@ -944,6 +1041,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       else commitRun(draft, picked);
       return;
     }
+    if (tool === 'edges') { edgesClick(clientX, clientY); return; }
     if (SOLID_TOOLS.includes(tool)) {
       if (!draft || draft.tool !== tool) {
         const solidId = solidAt(clientX, clientY);
@@ -1008,6 +1106,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       const r = parseLength(a, units);
       if (!r || r <= 0) return bad('radius');
       applyStep(circleTyped(d, r, id));
+    } else if (d?.tool === 'edges') {
+      commitEdges();
     } else if (d?.tool === 'pull') {
       const dist = typedPull();
       if (dist === null) return bad('distance');
@@ -1107,6 +1207,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
         break;
       case 'Enter':
         if (draft?.tool === 'line') applyStep(lineFinish(draft, () => uuidv4()));
+        else if (draft?.tool === 'edges') commitEdges();
         break;
       case 'Backspace':
       case 'Delete':
@@ -1125,6 +1226,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       case 'm': case 'M': setTool('move'); break;
       case 't': case 'T': setTool('rotate'); break;
       case 'i': case 'I': setTool('mirror'); break;
+      case 'e': case 'E': setTool('edges'); break;
       default: return;
     }
     e.preventDefault();
@@ -1178,6 +1280,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const activePointers = useRef(new Set<number>());
   const readMods = (e: React.PointerEvent) => { mods.current = { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }; };
   const onPointerDown = (e: React.PointerEvent) => {
+    pointerType.current = e.pointerType;
     activePointers.current.add(e.pointerId);
     pointer.current = { x: e.clientX, y: e.clientY };
     readMods(e);
@@ -1186,6 +1289,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     refreshPreview();
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    pointerType.current = e.pointerType;
     pointer.current = { x: e.clientX, y: e.clientY };
     readMods(e);
     refreshPreview();
@@ -1227,6 +1331,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     : draft?.tool === 'move' && draft.from ? [{ label: 'Length', placeholder: units === 'metric' ? '250' : `1' 4 1/2"` }, { label: 'Angle °', placeholder: 'from level' }]
     : draft?.tool === 'rotate' && draft.pivot ? [{ label: 'Angle °', placeholder: '90' }]
     : draft?.tool === 'photo-scale' && draft.b ? [{ label: 'Real length', placeholder: units === 'metric' ? '600' : `2' 6"` }]
+    : draft?.tool === 'edges' && draft.picks.length ? [{ label: edgeMode === 'round' ? 'Radius' : 'Size', placeholder: units === 'metric' ? '5' : '1/4' }]
     : [];
   const draftHint = draft?.tool === 'spin' ? (draft.a ? 'Click the second point of the axis.' : 'Click the first point of the line to spin round.')
     : draft?.tool === 'run' ? 'Now click the path to run it along.'
@@ -1236,7 +1341,12 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     : draft?.tool === 'mirror' ? (draft.a ? 'Click the second point of the mirror line.' : 'Click the first point of the mirror line.')
     : draft?.tool === 'photo-scale' ? (draft.b ? 'How long is that really?' : draft.a ? 'Click the other end of it.' : 'Click one end of a length you know on the photo (zoom in for accuracy).')
     : draft?.tool === 'photo-move' ? (draft.from ? 'Click where that point should go.' : 'Click a point on the photo.')
+    : draft?.tool === 'edges' ? (draft.picks.length
+      ? `${draft.picks.length} ${draft.picks.length === 1 ? 'edge' : 'edges'}. Click more edges (or a face), or one again to leave it out.`
+      : 'Click the edges to round or bevel, or a face for all the edges round it.')
     : null;
+  // Why the size typed cannot be used on the edges picked (shown in place of the hint).
+  const edgeTryError = draft?.tool === 'edges' && previewFeature && previewError?.key === previewKey ? previewError.message : null;
 
   const toolButton = (t: ToolId, label: string, icon: React.ReactNode, key: string) => (
     <button
@@ -1328,6 +1438,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             {toolButton('move', 'Move or copy', <Move size={18} />, 'M')}
             {toolButton('rotate', 'Rotate or copy round', <RotateCw size={18} />, 'T')}
             {toolButton('mirror', 'Mirror', <FlipHorizontal2 size={18} />, 'I')}
+            {toolButton('edges', 'Round or bevel edges', <SquareRoundCorner size={18} />, 'E')}
             <div className="my-1 h-px w-8 bg-edge" />
             <button type="button" data-testid="sketch-add-photo" onClick={() => setPhotoPicker(true)}
               title="Add a reference photo, scan or print to trace over" aria-label="Add a reference photo"
@@ -1434,6 +1545,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
               <SketchSteps
                 doc={doc}
                 plan={plan}
+                errors={buildErrorMap}
                 selectedId={selection && 'featureId' in selection ? selection.featureId : null}
                 editable={editable}
                 onSelect={id => { setDraft(null); setSelection(id ? { featureId: id } : null); }}
@@ -1484,8 +1596,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             </div>
           )}
           {buildErrors.length > 0 && (
-            <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-700/40 dark:bg-red-900/20 dark:text-red-300">
-              {engine === 'failed' ? 'The 3D engine could not start: ' : 'A shape could not be pulled: '}{buildErrors[0]}
+            <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-700/40 dark:bg-red-900/20 dark:text-red-300" data-testid="sketch-build-error">
+              {engine === 'failed' ? 'The 3D engine could not start: ' : 'A step could not be made: '}{buildErrors[0].message}
             </div>
           )}
 
@@ -1518,13 +1630,25 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                 ) : (
                   <span className="text-xs text-ink-soft">{facePick ? FACE_PICK_HINT : draftHint ?? TOOL_HINTS[tool]}</span>
                 )}
-                {typedFields.length > 0 && draftHint && <span className="text-xs text-ink-faint">{draftHint}</span>}
+                {typedFields.length > 0 && (edgeTryError
+                  ? <span className="text-xs font-medium text-amber-700 dark:text-amber-400" data-testid="sketch-edges-error">{edgeTryError}</span>
+                  : draftHint && <span className="text-xs text-ink-faint">{draftHint}</span>)}
                 {tool === 'combine' && (
                   <span className="flex items-center gap-0.5 rounded-md border border-edge p-0.5 text-xs">
                     {(['join', 'cut'] as const).map(m => (
                       <button key={m} type="button" data-testid={`sketch-combine-${m}`} onClick={() => setCombineMode(m)} aria-pressed={combineMode === m}
                         className={`rounded px-2 py-0.5 font-medium ${combineMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
                         {m === 'join' ? 'Join' : 'Cut'}
+                      </button>
+                    ))}
+                  </span>
+                )}
+                {tool === 'edges' && (
+                  <span className="flex items-center gap-0.5 rounded-md border border-edge p-0.5 text-xs">
+                    {(['round', 'bevel'] as const).map(m => (
+                      <button key={m} type="button" data-testid={`sketch-edges-${m}`} onClick={() => setEdgeMode(m)} aria-pressed={edgeMode === m}
+                        className={`rounded px-2 py-0.5 font-medium ${edgeMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
+                        {m === 'round' ? 'Round' : 'Bevel'}
                       </button>
                     ))}
                   </span>

@@ -4,11 +4,14 @@
 // on, and sometimes finishes a shape.
 import {
   dist2, rectanglePath, samePoint,
-  type CircleShape, type PathSegment, type PathShape, type SketchPlane, type SketchShape, type Vec2,
+  type CircleShape, type PathSegment, type PathShape, type SketchPlane, type SketchShape, type Vec2, type Vec3,
 } from './sketchModel';
 import { pointAt } from './sketchSnap';
 
-export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull' | 'spin' | 'run' | 'combine' | 'move' | 'rotate' | 'mirror';
+export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull' | 'spin' | 'run' | 'combine' | 'move' | 'rotate' | 'mirror' | 'edges';
+
+/** An edge picked to round or bevel: which of the solid's edges, a point on it, and its line (for drawing it). */
+export interface PickedEdge { index: number; point: Vec3; line: Float32Array }
 
 export type Draft =
   /** A chain of lines and arcs. `arcThrough` is set while an arc waits for its end. */
@@ -29,6 +32,9 @@ export type Draft =
   | { tool: 'rotate'; solidId: string; pivot?: Vec2 }
   /** Mirroring a solid: picked, then the mirror line's first point. */
   | { tool: 'mirror'; solidId: string; a?: Vec2 }
+  /** Rounding or bevelling a solid's edges: the edges picked so far, from the solid's edges as they
+   *  were when the first was picked (`base`; the view shows the rounding as it would be). */
+  | { tool: 'edges'; solidId: string; picks: PickedEdge[]; base: { solidId: string; edges: Float32Array; edgeRuns: Uint32Array } }
   /** Setting a reference photo's scale: two points on it a known length apart, then that length. */
   | { tool: 'photo-scale'; refId: string; a?: Vec2; b?: Vec2 }
   /** Moving a reference photo: a point on it, then where that point goes. */
@@ -122,6 +128,20 @@ export const draftPreview = (draft: Draft | null, at: Vec2 | null): SketchShape 
     else if (!samePoint(at, lastPoint(draft))) segments.push({ kind: 'line', to: at });
   }
   return { id: 'preview', type: 'path', plane: draft.plane, start: draft.start, segments, closed: false };
+};
+
+/** A click on an edge picks it, or leaves it out again if it was picked. */
+export const toggleEdge = (picks: PickedEdge[], edge: PickedEdge): PickedEdge[] =>
+  picks.some(p => p.index === edge.index) ? picks.filter(p => p.index !== edge.index) : [...picks, edge];
+
+/** A click on a face picks all the edges round it, or, when they are all picked already, leaves them all out. */
+export const toggleFaceEdges = (picks: PickedEdge[], edges: PickedEdge[]): PickedEdge[] => {
+  const has = new Set(picks.map(p => p.index));
+  if (edges.every(e => has.has(e.index))) {
+    const out = new Set(edges.map(e => e.index));
+    return picks.filter(p => !out.has(p.index));
+  }
+  return [...picks, ...edges.filter(e => !has.has(e.index))];
 };
 
 export { lastPoint as draftLastPoint };

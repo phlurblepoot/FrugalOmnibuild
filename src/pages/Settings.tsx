@@ -29,6 +29,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.6',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 4, part 1): a new Round or bevel edges tool (E). Click the edges of a solid (the one under the pointer lights up), or click a face to pick all the edges round it; click one again to leave it out, or Backspace for the last. Type the radius (Round) or how far back to cut (Bevel) and the solid shows it straight away; Enter makes it a step.',
+      'Sketch: a size too big for the edges picked is caught before it is made, with a message saying so. Rounds and bevels are in the step list, where the size can be changed later, and they show in drawing sheets, pictures and CAD files.',
+      'Sketch: a step that cannot be built now says why in the step list as well as at the top of the view.',
+    ],
+  },
+  {
     version: '4.6.9.5',
     date: 'October 29, 2026',
     changes: [

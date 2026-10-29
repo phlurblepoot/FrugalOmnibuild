@@ -8,6 +8,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import {
   arcPoints, circleThrough, cuttingPulls, formatLength, frameOf, recipePieces, referenceCorners, shapeOutline, toWorld,
   usedShapeIds, type RecipePiece, type ReferencePhoto, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Vec2, type Vec3,
@@ -15,6 +18,7 @@ import {
 import { gridStep, majorEvery, type SnapKind } from './sketchSnap';
 import type { SolidMesh } from './geometryTypes';
 import type { ReferenceImage } from './referenceImage';
+import { edgeCount, edgeLine, edgeRefPoint, edgesOfFace, faceOfTriangle } from './sketchEdges';
 
 /** 'plane' looks straight at the work plane (a face of a solid). */
 export type ViewName = 'top' | 'front' | 'side' | 'iso' | 'plane';
@@ -70,7 +74,22 @@ export interface ScenePreview {
   ghost?: { solidId: string; matrices: number[][] } | null;
   /** A dashed line on a plane: a move's direction, or (extended both ways) a mirror line. */
   line?: { plane: SketchPlane; a: Vec2; b: Vec2; extend?: boolean } | null;
+  /** Edges picked to round or bevel, and the one under the pointer (segments, xyz xyz …). */
+  edges?: { picked: Float32Array[]; hover: Float32Array | null } | null;
 }
+
+/** An edge of a solid under the pointer. */
+export interface EdgeHit {
+  solidId: string;
+  /** Which of the solid's edges (see edgeRuns). */
+  index: number;
+  /** A point on it away from its ends, which finds it again when the solid is rebuilt. */
+  point: Vec3;
+  line: Float32Array;
+}
+
+/** The edges to pick from: a solid's as shown, or (while a rounding is previewed) as they were before it. */
+export interface EdgeSource { solidId: string; edges: Float32Array; edgeRuns: Uint32Array }
 
 /** A solid under the pointer: which one, where, and the face it was hit on. */
 export interface SolidHit {
@@ -402,6 +421,66 @@ export class SketchScene {
     return null;
   }
 
+  /** The screen position (px from the view's top left) of a world point, and how far it is in front of the camera. */
+  private toScreen(p: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+    out.copy(p).project(this.camera);
+    const w = this.container.clientWidth, h = this.container.clientHeight;
+    return out.set((out.x + 1) / 2 * w, (1 - out.y) / 2 * h, out.z);
+  }
+
+  /** The nearest edge within `slopPx` of the pointer that is not hidden behind a face, from these
+   *  solids' edges (a solid being rounded gives the edges it had before the rounding shown). */
+  pickEdge(clientX: number, clientY: number, slopPx: number, sources: EdgeSource[]): EdgeHit | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const mx = clientX - r.left, my = clientY - r.top;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), sa = new THREE.Vector3(), sb = new THREE.Vector3();
+    const near: { d: number; src: EdgeSource; index: number; at: THREE.Vector3 }[] = [];
+    for (const src of sources) {
+      for (let e = 0; e < edgeCount(src); e++) {
+        const line = edgeLine(src, e);
+        let best = Infinity, bestAt: THREE.Vector3 | null = null;
+        for (let i = 0; i + 5 < line.length; i += 6) {
+          a.set(line[i], line[i + 1], line[i + 2]);
+          b.set(line[i + 3], line[i + 4], line[i + 5]);
+          this.toScreen(a, sa);
+          this.toScreen(b, sb);
+          if (sa.z > 1 || sb.z > 1) continue;
+          const dx = sb.x - sa.x, dy = sb.y - sa.y, len2 = dx * dx + dy * dy;
+          const t = len2 ? Math.max(0, Math.min(1, ((mx - sa.x) * dx + (my - sa.y) * dy) / len2)) : 0;
+          const d = Math.hypot(sa.x + t * dx - mx, sa.y + t * dy - my);
+          if (d < best) { best = d; bestAt = a.clone().lerp(b, t); }
+        }
+        if (bestAt && best <= slopPx) near.push({ d: best, src, index: e, at: bestAt });
+      }
+    }
+    near.sort((x, y) => x.d - y.d);
+    // Not behind a face: nothing solid lies between the camera and the edge.
+    const solids = this.pickables.filter(o => o.userData.solid);
+    const eps = Math.max(0.5, 1.5 / this.pxPerMm());
+    for (const c of near) {
+      const screen = this.toScreen(c.at, new THREE.Vector3());
+      const ray = this.rayAt(r.left + screen.x, r.top + screen.y);
+      const depth = c.at.clone().sub(ray.origin).dot(ray.direction);
+      const first = this.raycaster.intersectObjects(solids, false)[0];
+      if (first && first.distance < depth - eps) continue;
+      const line = edgeLine(c.src, c.index);
+      return { solidId: c.src.solidId, index: c.index, point: edgeRefPoint(line), line };
+    }
+    return null;
+  }
+
+  /** The edges (by their index in its source) around the face under the pointer, of the solids given. */
+  faceEdgesAt(clientX: number, clientY: number, sources: EdgeSource[]): { solidId: string; edges: number[] } | null {
+    this.rayAt(clientX, clientY);
+    const solids = this.pickables.filter(o => o.userData.solid && sources.some(src => src.solidId === (o.userData.solid as SolidMesh).solidId));
+    const hit = this.raycaster.intersectObjects(solids, false)[0];
+    if (!hit) return null;
+    const solid = hit.object.userData.solid as SolidMesh;
+    const src = sources.find(x => x.solidId === solid.solidId)!;
+    const face = faceOfTriangle(solid, hit.faceIndex ?? 0);
+    return { solidId: solid.solidId, edges: edgesOfFace({ ...solid, edges: src.edges, edgeRuns: src.edgeRuns }, face) };
+  }
+
   private solidHit(solid: SolidMesh, hit: THREE.Intersection): SolidHit {
     const at = (hit.faceIndex ?? 0) * 3;
     let start = 0, count = solid.indices.length;
@@ -640,6 +719,23 @@ export class SketchScene {
         const from = { x: a.x - u.x * k, y: a.y - u.y * k }, to = { x: b.x + u.x * k, y: b.y + u.y * k };
         this.preview.add(this.dashed([from, to], p.line.plane, t.preview));
       }
+    }
+    if (p.edges) {
+      const w = this.container.clientWidth, h = this.container.clientHeight;
+      const fat = (lines: Float32Array[], color: number, width: number) => {
+        const all = new Float32Array(lines.reduce((n, l) => n + l.length, 0));
+        let at = 0;
+        for (const l of lines) { all.set(l, at); at += l.length; }
+        if (!all.length) return;
+        const g = new LineSegmentsGeometry().setPositions(all);
+        const m = new LineMaterial({ color, linewidth: width, depthTest: true });
+        m.resolution.set(w, h);
+        const obj = new LineSegments2(g, m);
+        obj.renderOrder = 3;
+        this.preview.add(obj);
+      };
+      if (p.edges.hover) fat([p.edges.hover], t.preview, 3);
+      fat(p.edges.picked, t.selected, 4);
     }
     if (p.readout) {
       const obj = new CSS2DObject(labelEl(p.readout.text, 'readout'));

@@ -1,11 +1,11 @@
 // src/pages/sketch/SketchSteps.tsx
 // The sketch's steps in order (pulls, spins, runs, joins and cuts, moves and
-// copies): pick one to see it on the model, change its distance, angle or
-// copies, or delete it. A deleted pull, spin or run leaves its shape as an
+// copies, rounded and bevelled edges): pick one to see it on the model, change
+// its distance, angle, copies or size, or delete it. A deleted pull, spin or run leaves its shape as an
 // outline again; anything drawn on its faces goes with it.
 import React, { useEffect, useState } from 'react';
 import {
-  AlertTriangle, ArrowUpFromLine, Combine, FlipHorizontal2, Move, Rotate3d, RotateCw, Route, Trash2, X,
+  AlertTriangle, ArrowUpFromLine, Combine, FlipHorizontal2, Hexagon, Move, Rotate3d, RotateCw, Route, SquareRoundCorner, Trash2, X,
 } from 'lucide-react';
 import {
   describeShape, formatLength, isShapeFeature, parseLength, removeFeature, setPullDistance,
@@ -19,6 +19,10 @@ const stepName = (doc: SketchDoc, f: SketchFeature): string => {
     case 'spin': return `Spin ${round1(f.angle)}°`;
     case 'run': return 'Run along a path';
     case 'combine': return f.mode === 'join' ? 'Join two solids' : 'Cut one solid from another';
+    case 'edges': {
+      const n = f.points.length;
+      return `${f.mode === 'round' ? 'Round' : 'Bevel'} ${n} ${n === 1 ? 'edge' : 'edges'} ${formatLength(f.size, doc.units)}`;
+    }
     case 'move': {
       const t = f.transform;
       if (t.kind === 'mirror') return f.copies ? 'Mirror copy' : 'Mirror';
@@ -39,6 +43,7 @@ const StepIcon: React.FC<{ f: SketchFeature }> = ({ f }) => {
     case 'spin': return <Rotate3d size={15} />;
     case 'run': return <Route size={15} />;
     case 'combine': return <Combine size={15} />;
+    case 'edges': return f.mode === 'round' ? <SquareRoundCorner size={15} /> : <Hexagon size={15} />;
     case 'move': return f.transform.kind === 'mirror' ? <FlipHorizontal2 size={15} /> : f.transform.kind === 'rotate' ? <RotateCw size={15} /> : <Move size={15} />;
     default: return <ArrowUpFromLine size={15} />;
   }
@@ -48,6 +53,7 @@ const StepIcon: React.FC<{ f: SketchFeature }> = ({ f }) => {
 const editable = (doc: SketchDoc, f: SketchFeature): { label: string; value: string; copies: boolean } | null => {
   if (f.type === 'pull') return { label: 'Distance', value: formatLength(Math.abs(f.distance), doc.units), copies: false };
   if (f.type === 'spin') return { label: 'Angle °', value: String(f.angle), copies: false };
+  if (f.type === 'edges') return { label: f.mode === 'round' ? 'Radius' : 'Size', value: formatLength(f.size, doc.units), copies: false };
   if (f.type === 'move' && f.transform.kind === 'move') return { label: f.copies ? 'Apart' : 'Distance', value: formatLength(Math.hypot(...f.transform.by), doc.units), copies: true };
   if (f.type === 'move' && f.transform.kind === 'rotate') return { label: 'Angle °', value: String(f.transform.angle), copies: true };
   return null;
@@ -56,13 +62,15 @@ const editable = (doc: SketchDoc, f: SketchFeature): { label: string; value: str
 export const SketchSteps: React.FC<{
   doc: SketchDoc;
   plan: SolidPlan;
+  /** Steps that could not be built, and why (from the geometry engine). */
+  errors?: Map<string, string>;
   selectedId: string | null;
   editable: boolean;
   onSelect: (featureId: string | null) => void;
   onChange: (doc: SketchDoc) => void;
   onClose: () => void;
   onError: (message: string) => void;
-}> = ({ doc, plan, selectedId, editable: canEdit, onSelect, onChange, onClose, onError }) => {
+}> = ({ doc, plan, errors, selectedId, editable: canEdit, onSelect, onChange, onClose, onError }) => {
   const selected = doc.features.find(f => f.id === selectedId);
   const edit = selected ? editable(doc, selected) : null;
   const [value, setValue] = useState('');
@@ -83,6 +91,12 @@ export const SketchSteps: React.FC<{
       // A plain number keeps the way it pulls; a minus sign turns it round.
       const next = /^\s*[-−]/.test(value) ? -Math.sign(selected.distance) * Math.abs(len) : Math.sign(selected.distance) * Math.abs(len);
       if (next !== selected.distance) onChange(setPullDistance(doc, selected.id, next));
+      return;
+    }
+    if (selected.type === 'edges') {
+      const size = parseLength(value, doc.units);
+      if (size === null || size <= 0) { onError(`Type a size, e.g. ${doc.units === 'metric' ? '5' : '1/4'}.`); return; }
+      if (size !== selected.size) replace({ ...selected, size });
       return;
     }
     const angle = parseFloat(value.replace('°', ''));
@@ -120,7 +134,7 @@ export const SketchSteps: React.FC<{
         <ol className="min-h-0 flex-1 overflow-y-auto py-1">
           {doc.features.map((f, i) => {
             const shape = isShapeFeature(f) ? doc.shapes.find(s => s.id === f.shapeId) : undefined;
-            const skip = plan.skipped.get(f.id);
+            const skip = plan.skipped.get(f.id) ?? errors?.get(f.id);
             const isSel = f.id === selectedId;
             const ed = isSel ? edit : null;
             return (

@@ -370,6 +370,37 @@ describe('joining, cutting, moving and copying solids', () => {
   });
 });
 
+describe('rounding and bevelling edges', () => {
+  const block = (): SketchDoc => {
+    const doc = emptySketch('metric');
+    doc.shapes.push(rectanglePath('a', 'ground', { x: 0, y: 0 }, { x: 100, y: 50 }));
+    doc.features.push({ id: 'pa', type: 'pull', shapeId: 'a', distance: 30 });
+    return doc;
+  };
+
+  it('rounds the solid where it is, keeping its id, pieces and pulls', () => {
+    const doc = block();
+    doc.features.push({ id: 'r1', type: 'edges', mode: 'round', targetId: 'pa', points: [[50, 0, 30]], size: 5 });
+    const plan = planSolids(doc);
+    expect(plan.solids.map(s => s.id)).toEqual(['pa']);
+    expect(plan.solids[0].featureIds).toEqual(['pa', 'r1']);
+    expect(plan.solids[0].pullIds).toEqual(['pa']); // its faces are still where the pull made them
+    expect(plan.solids[0].recipe).toMatchObject({ op: 'edges', fid: 'r1', mode: 'round', size: 5, of: { op: 'pull', fid: 'pa' } });
+    expect(recipePieces(plan.solids[0].recipe).map(p => p.fid)).toEqual(['pa']);
+    // A move after it moves the rounded solid; a copy of it is rounded too.
+    doc.features.push({ id: 'm1', type: 'move', targetId: 'pa', transform: { kind: 'move', by: [0, 300, 0] }, copies: 1 });
+    expect(planSolids(doc).solids[1].recipe).toMatchObject({ op: 'transform', of: { op: 'edges', fid: 'r1' } });
+  });
+
+  it('skips a rounding with nothing to round, and tidies one away with its solid', () => {
+    const doc = block();
+    doc.features.push({ id: 'r0', type: 'edges', mode: 'bevel', targetId: 'pa', points: [], size: 5 });
+    expect(planSolids(doc).skipped.get('r0')).toMatch(/No edges/);
+    doc.features.push({ id: 'r1', type: 'edges', mode: 'bevel', targetId: 'pa', points: [[0, 25, 30]], size: 5 });
+    expect(removeShape(doc, 'a').features).toEqual([]);
+  });
+});
+
 describe('reference photos', () => {
   const photo = { id: 'r', fileId: 'f', name: 'detail.jpg', plane: 'front' as const, center: { x: 100, y: 50 }, width: 200, aspect: 0.5, rotation: 0, opacity: 0.6 };
 

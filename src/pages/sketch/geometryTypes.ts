@@ -18,6 +18,8 @@ export interface SolidMesh {
   faceRuns: Uint32Array;
   /** The solid's true edges as line segments: xyz xyz per segment. */
   edges: Float32Array;
+  /** Each edge as a run of `edges` points (two per segment): start, count, start, count, … */
+  edgeRuns: Uint32Array;
 }
 
 export interface BuildRequest { kind?: 'build'; requestId: number; doc: SketchDoc }

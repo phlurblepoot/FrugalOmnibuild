@@ -8,7 +8,7 @@
 import opencascade from 'replicad-opencascadejs';
 // @ts-ignore — Vite turns ?url imports into the emitted asset's URL
 import wasmUrl from 'replicad-opencascadejs/wasm?url';
-import { setOC, draw, drawCircle, genericSweep, makeCompound, makeProjectedEdges, Plane, ProjectionCamera, type Drawing } from 'replicad';
+import { setOC, draw, drawCircle, genericSweep, makeCompound, makeProjectedEdges, EdgeFinder, Plane, ProjectionCamera, type Drawing } from 'replicad';
 import { frameOf, planSolids, type Recipe, type SketchDoc, type SketchShape, type Transform, type Vec3 } from './sketchModel';
 import type { BuildRequest, BuildResponse, ProjectRequest, ProjectResponse, ProjectedView, SolidMesh } from './geometryTypes';
 
@@ -36,10 +36,12 @@ interface SolidLike {
   translate(v: Vec3): SolidLike;
   rotate(angle: number, origin: Vec3, axis: Vec3): SolidLike;
   mirror(normal: Vec3, origin: Vec3): SolidLike;
+  fillet(radius: number, filter: (e: EdgeFinder) => EdgeFinder): SolidLike;
+  chamfer(size: number, filter: (e: EdgeFinder) => EdgeFinder): SolidLike;
   mesh(o: { tolerance: number; angularTolerance: number }): {
     vertices: number[]; normals: number[]; triangles: number[]; faceGroups: { start: number; count: number }[];
   };
-  meshEdges(o: { tolerance: number; angularTolerance: number }): { lines: number[] };
+  meshEdges(o: { tolerance: number; angularTolerance: number }): { lines: number[]; edgeGroups: { start: number; count: number }[] };
   delete(): void;
 }
 interface SketchLike {
@@ -87,6 +89,37 @@ const transformed = (s: SolidLike, t: Transform, times: number): SolidLike => {
   return s.mirror(t.normal, t.origin);
 };
 
+// How close (mm) a kept point must be to an edge for it to be that edge.
+const EDGE_TOLERANCE = 0.02;
+
+/** A solid with the edges through these points rounded or bevelled; the solid as it was (and an
+ *  error for the step) when that cannot be done, or some of the edges are no longer there. */
+const roundEdges = (s: SolidLike, r: Extract<Recipe, { op: 'edges' }>, errors: Errors): SolidLike => {
+  const found = r.points.filter(p => {
+    const hits = new EdgeFinder().withinDistance(EDGE_TOLERANCE, p).find(s as never) as unknown as { delete(): void }[];
+    for (const h of hits) h.delete();
+    return hits.length > 0;
+  });
+  const what = r.mode === 'round' ? 'round' : 'bevel';
+  if (found.length < r.points.length) {
+    const n = r.points.length - found.length;
+    errors.push({ featureId: r.fid, message: n === r.points.length
+      ? `The edges to ${what} are no longer there: the solid has changed. Delete this step and ${what} them again.`
+      : `${n} of the edges to ${what} ${n === 1 ? 'is' : 'are'} no longer there: the solid has changed.` });
+    if (!found.length) return s;
+  }
+  try {
+    const pick = (e: EdgeFinder) => e.either(found.map(p => (x: EdgeFinder) => x.withinDistance(EDGE_TOLERANCE, p)));
+    const out = r.mode === 'round' ? s.fillet(r.size, pick) : s.chamfer(r.size, pick);
+    s.delete();
+    return out;
+  } catch {
+    // OpenCascade gives no reason; nearly always the size is more than the faces beside an edge allow.
+    errors.push({ featureId: r.fid, message: `Too big to ${what} ${found.length === 1 ? 'that edge' : 'those edges'}: try a smaller size.` });
+    return s;
+  }
+};
+
 /** Builds a recipe into a new OpenCascade solid (the caller deletes it), or null when it cannot be built. */
 const make = (r: Recipe, errors: Errors): SolidLike | null => {
   try {
@@ -101,6 +134,10 @@ const make = (r: Recipe, errors: Errors): SolidLike | null => {
           s.delete();
           return null;
         }
+      }
+      case 'edges': {
+        const s = make(r.of, errors);
+        return s && roundEdges(s, r, errors);
       }
       case 'pull':
         return sketchOf(r.shape).extrude(r.distance);
@@ -159,6 +196,7 @@ const buildSolid = (recipe: Recipe): Built => {
         indices: new Uint32Array(m.triangles),
         faceRuns: new Uint32Array(m.faceGroups.flatMap(g => [g.start, g.count])),
         edges: new Float32Array(edges.lines),
+        edgeRuns: new Uint32Array(edges.edgeGroups.flatMap(g => [g.start, g.count])),
       };
     } catch (e) {
       errors.push({ featureId: recipe.fid, message: message(e) });
@@ -249,9 +287,10 @@ self.onmessage = async (event: MessageEvent<BuildRequest | ProjectRequest>) => {
     const result = build(doc);
     // Copies, so the cached arrays stay usable after the transfer.
     const solids = result.solids.map(s => ({
-      ...s, positions: s.positions.slice(), normals: s.normals.slice(), indices: s.indices.slice(), faceRuns: s.faceRuns.slice(), edges: s.edges.slice(),
+      ...s, positions: s.positions.slice(), normals: s.normals.slice(), indices: s.indices.slice(), faceRuns: s.faceRuns.slice(),
+      edges: s.edges.slice(), edgeRuns: s.edgeRuns.slice(),
     }));
-    const transfer = solids.flatMap(s => [s.positions.buffer, s.normals.buffer, s.indices.buffer, s.faceRuns.buffer, s.edges.buffer]);
+    const transfer = solids.flatMap(s => [s.positions.buffer, s.normals.buffer, s.indices.buffer, s.faceRuns.buffer, s.edges.buffer, s.edgeRuns.buffer]);
     (self as unknown as Worker).postMessage({ requestId, solids, errors: result.errors } satisfies BuildResponse, transfer);
   } catch (e) {
     (self as unknown as Worker).postMessage({

@@ -529,3 +529,84 @@ test('Sketch: arc mode turns itself off after one arc; exports a drawing sheet, 
   const view = await (await request.get(`/api/files/${dxfRow.id}/content`, { headers: auth })).text();
   expect(view).toMatch(/\r\n(LINE|POLYLINE)\r\n8\r\nVISIBLE\r\n/);
 });
+
+test('Sketch: round an edge and bevel the edges round a face; too big is caught; change the size in the step list', async ({ authedPage: page, apiToken, request }) => {
+  const auth = { Authorization: `Bearer ${apiToken.token}` };
+  await page.goto('/tools/sketch?new=1');
+  await page.getByLabel('Name').fill('Rounded block');
+  await page.getByTestId('new-sketch-create').click();
+  await expect(page).toHaveURL(/\/tools\/sketch\?fileId=/);
+  const fileId = new URL(page.url()).searchParams.get('fileId')!;
+  const box = await viewBox(page);
+  const cx = box.x + box.width / 2 - 100, cy = box.y + box.height / 2 + 60;
+  const centre = async (label: ReturnType<Page['locator']>) => {
+    const b = (await label.boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+
+  // A block 4" wide, 2" high, 3" deep.
+  await page.getByTestId('sketch-tool-rect').click();
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await page.mouse.move(cx + 60, cy - 60);
+  await page.getByTestId('sketch-typed-0').fill('4');
+  await page.getByTestId('sketch-typed-1').fill('2');
+  await page.getByTestId('sketch-typed-1').press('Enter');
+  await page.getByTestId('sketch-tool-pull').click();
+  await page.mouse.click(cx + 30, cy - 20);
+  await page.getByTestId('sketch-typed-0').fill('3');
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.locator('.sketch-label-pull', { hasText: '3"' })).toBeVisible({ timeout: 60_000 });
+
+  // Round the front bottom edge: seen from the front, its length label sits on it.
+  await page.getByTestId('sketch-view-front').click();
+  await page.getByTestId('sketch-tool-edges').click();
+  await expect(page.getByTestId('sketch-edges-round')).toHaveAttribute('aria-pressed', 'true');
+  const width = page.locator('.sketch-label-dim', { hasText: /^4"$/ });
+  const bottom = await centre(width.first());
+  await page.mouse.move(bottom.x, bottom.y);
+  await page.mouse.click(bottom.x, bottom.y);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('1 edge.');
+  await page.getByTestId('sketch-typed-0').fill('1/4');
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.getByTestId('sketch-step-1')).toContainText('Round 1 edge 1/4"', { timeout: 60_000 });
+
+  // Bevel the four edges round the top: from above, a click on the top face picks them all.
+  await page.getByTestId('sketch-view-top').click();
+  await page.getByTestId('sketch-edges-bevel').click();
+  const top = { x: (await centre(width.first())).x, y: (await centre(page.locator('.sketch-label-pull'))).y };
+  await page.mouse.move(top.x, top.y);
+  await page.mouse.click(top.x, top.y);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('4 edges.');
+  // Backspace leaves the last one out; the face again puts it back.
+  await page.keyboard.press('Backspace');
+  await expect(page.getByTestId('sketch-vcb')).toContainText('3 edges.');
+  await page.mouse.click(top.x, top.y);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('4 edges.');
+  // 3" is more than the 2" high block allows: the preview says so and Enter does not make it.
+  await page.getByTestId('sketch-typed-0').fill('3');
+  await expect(page.getByTestId('sketch-edges-error')).toContainText('Too big to bevel those edges', { timeout: 60_000 });
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.getByTestId('sketch-step-2')).toHaveCount(0);
+  await page.getByTestId('sketch-typed-0').fill('1/8');
+  await expect(page.getByTestId('sketch-vcb')).toContainText('4 edges.', { timeout: 60_000 });
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.getByTestId('sketch-step-2')).toContainText('Bevel 4 edges 1/8"', { timeout: 60_000 });
+  await expect(page.getByTestId('sketch-build-error')).toHaveCount(0);
+
+  // The bevel's size changes in the step list.
+  await page.getByTestId('sketch-step-2').getByRole('button').first().click();
+  await page.getByTestId('sketch-step-value').fill('1/16');
+  await page.getByTestId('sketch-step-value').press('Enter');
+  await expect(page.getByTestId('sketch-step-2')).toContainText('Bevel 4 edges 1/16"');
+  await expect(page.getByTestId('sketch-build-error')).toHaveCount(0);
+
+  await page.getByTestId('sketch-save').click();
+  await expect(page.getByText('Saved as version 2')).toBeVisible();
+  const saved = JSON.parse(await (await request.get(`/api/files/${fileId}/content`, { headers: auth })).text());
+  expect(saved.features.map((f: { type: string }) => f.type)).toEqual(['pull', 'edges', 'edges']);
+  expect(saved.features[1]).toMatchObject({ mode: 'round', size: 6.35, targetId: saved.features[0].id });
+  expect(saved.features[1].points).toHaveLength(1);
+  expect(saved.features[2]).toMatchObject({ mode: 'bevel', size: 1.5875 });
+  expect(saved.features[2].points).toHaveLength(4);
+});

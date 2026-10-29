@@ -166,9 +166,22 @@ export interface MoveFeature {
   copies: number;
 }
 
+/** Round (fillet) or bevel (chamfer) some of a solid's edges. Each edge is
+ *  kept as a point on it, and found again by that point whenever the solid is built. */
+export interface EdgeFeature {
+  id: string;
+  type: 'edges';
+  mode: 'round' | 'bevel';
+  targetId: string;
+  /** A point on each edge, in world millimetres. */
+  points: Vec3[];
+  /** A round's radius, or how far a bevel cuts back along each face, in millimetres. */
+  size: number;
+}
+
 /** The steps that are made from a shape (pull, spin, run), as opposed to ones that work on solids. */
 export type ShapeFeature = PullFeature | SpinFeature | RunFeature;
-export type SketchFeature = ShapeFeature | CombineFeature | MoveFeature;
+export type SketchFeature = ShapeFeature | CombineFeature | MoveFeature | EdgeFeature;
 export const isShapeFeature = (f: SketchFeature): f is ShapeFeature => f.type === 'pull' || f.type === 'spin' || f.type === 'run';
 
 /** A photo, scan or print (a PDF's first page) laid on a plane to trace over. The file lives in Documents. */
@@ -370,7 +383,9 @@ export type Recipe =
   | { op: 'run'; fid: string; shape: SketchShape; path: SketchShape }
   | { op: 'join' | 'cut'; fid: string; a: Recipe; b: Recipe }
   /** The solid moved, turned or mirrored, `times` steps over (a copy n along is n steps). */
-  | { op: 'transform'; fid: string; of: Recipe; t: Transform; times: number };
+  | { op: 'transform'; fid: string; of: Recipe; t: Transform; times: number }
+  /** The solid with the edges through these points rounded or bevelled. */
+  | { op: 'edges'; fid: string; of: Recipe; mode: 'round' | 'bevel'; points: Vec3[]; size: number };
 
 export interface PlannedSolid {
   /** The id of the step that made it (a copy's is the step's id, a colon and its number). */
@@ -446,6 +461,17 @@ export const planSolids = (doc: SketchDoc): SolidPlan => {
       a.pullIds.push(...b.pullIds);
       live.delete(u);
       merged.set(u, t);
+      owner.set(f.id, t);
+      continue;
+    }
+    if (f.type === 'edges') {
+      const t = resolve(f.targetId);
+      if (!t) { skipped.set(f.id, SOLID_GONE); continue; }
+      if (!(f.size > 0) || !f.points.length) { skipped.set(f.id, 'No edges, or no size, to round.'); continue; }
+      // Rounding leaves the solid where it is: its pulls' outlines stay put.
+      const src = live.get(t)!;
+      src.recipe = { op: 'edges', fid: f.id, of: src.recipe, mode: f.mode, points: f.points, size: f.size };
+      src.featureIds.push(f.id);
       owner.set(f.id, t);
       continue;
     }
@@ -601,9 +627,9 @@ export const setPullDistance = (doc: SketchDoc, featureId: string, distance: num
 
 /** The steps that made pieces of a solid (pulls, spins and runs), in order, as built (a run's profile where it
  *  was moved to). Pieces of a solid that has since been moved are left out: they are no longer where they were made. */
-export type RecipePiece = Exclude<Recipe, { op: 'join' | 'cut' | 'transform' }>;
+export type RecipePiece = Exclude<Recipe, { op: 'join' | 'cut' | 'transform' | 'edges' }>;
 export const recipePieces = (r: Recipe): RecipePiece[] =>
-  r.op === 'transform' ? [] : 'a' in r ? [...recipePieces(r.a), ...recipePieces(r.b)] : [r];
+  r.op === 'transform' ? [] : r.op === 'edges' ? recipePieces(r.of) : 'a' in r ? [...recipePieces(r.a), ...recipePieces(r.b)] : [r];
 
 /** A shape in a few words, for the step list: "Rectangle 6" × 4"", "Circle Ø 3"", "Shape, 7 sides". */
 export const describeShape = (s: SketchShape, units: SketchUnits): string => {
@@ -654,7 +680,7 @@ export const applyTransform = (t: Transform, p: Vec3, times = 1): Vec3 => {
 
 /** The pulls that cut into the solid they were drawn on (as opposed to joining it, or starting one). */
 export const cuttingPulls = (r: Recipe, out = new Set<string>()): Set<string> => {
-  if (r.op === 'transform') cuttingPulls(r.of, out);
+  if (r.op === 'transform' || r.op === 'edges') cuttingPulls(r.of, out);
   else if (r.op === 'join' || r.op === 'cut') {
     if (r.op === 'cut' && r.b.op === 'pull' && r.b.fid === r.fid) out.add(r.fid);
     cuttingPulls(r.a, out);
