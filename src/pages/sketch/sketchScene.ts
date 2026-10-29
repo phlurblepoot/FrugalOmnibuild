@@ -1,31 +1,39 @@
 // src/pages/sketch/sketchScene.ts
-// The sketch editor's 3D view (three.js): an orthographic camera looking from
-// Top, Front, Side or a 3D angle; the grid on the work plane; the sketch's
-// shapes and solids; dimension labels; and the in-progress preview. World
-// units are millimetres with z up, as in the sketch file and OpenCascade.
+// The sketch editor's 3D view (three.js): a camera looking from Top, Front,
+// Side, straight at the work plane (a face), or from a 3D angle, flat or in
+// perspective; the grid on the work plane; the sketch's shapes and solids;
+// dimension labels; and the in-progress preview (snap guides, the angle being
+// drawn, a pull's ghost). World units are millimetres with z up, as in the
+// sketch file and OpenCascade.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {
-  PLANES, arcPoints, circleThrough, formatLength, pulledShapeIds, shapeOutline, toWorld,
-  type PlaneId, type SketchDoc, type SketchShape, type SketchUnits, type Vec2, type Vec3,
+  arcPoints, circleThrough, formatLength, frameOf, pulledShapeIds, shapeOutline, toWorld,
+  type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type Vec2, type Vec3,
 } from './sketchModel';
 import { gridStep, majorEvery, type SnapKind } from './sketchSnap';
 import type { SolidMesh } from './geometryTypes';
 
-export type ViewName = 'top' | 'front' | 'side' | 'iso';
-export const VIEW_FOR_PLANE: Record<PlaneId, ViewName> = { ground: 'top', front: 'front', side: 'side' };
+/** 'plane' looks straight at the work plane (a face of a solid). */
+export type ViewName = 'top' | 'front' | 'side' | 'iso' | 'plane';
+
+/** The view that looks straight at a plane. */
+export const viewForPlane = (plane: SketchPlane): ViewName =>
+  typeof plane === 'string' ? ({ ground: 'top', front: 'front', side: 'side' } as const)[plane] : 'plane';
 
 // Camera direction (from the target) and screen-up for each view. Top looks
 // straight down with y up the screen; Front looks along +y; Side along −x;
 // the 3D view from the front-right, above.
-const VIEWS: Record<ViewName, { dir: Vec3; up: Vec3 }> = {
+const VIEWS: Record<Exclude<ViewName, 'plane'>, { dir: Vec3; up: Vec3 }> = {
   top: { dir: [0, 0, 1], up: [0, 1, 0] },
   front: { dir: [0, -1, 0], up: [0, 0, 1] },
   side: { dir: [1, 0, 0], up: [0, 0, 1] },
   iso: { dir: [1, -1.2, 0.9], up: [0, 0, 1] },
 };
 const CAMERA_DISTANCE = 100_000;
+const FOV_DEG = 40;
+const TAN_HALF_FOV = Math.tan((FOV_DEG * Math.PI) / 360);
 
 export interface SceneContent {
   doc: SketchDoc;
@@ -37,24 +45,43 @@ export interface SceneContent {
 
 export interface ScenePreview {
   shape: SketchShape | null;
-  snap: { p: Vec2; plane: PlaneId; kind: SnapKind } | null;
+  /** The snapped point, and the points its level or plumb guides run from. */
+  snap: { p: Vec2; plane: SketchPlane; kind: SnapKind; guides?: Vec2[] } | null;
   /** Live readout beside the pointer (e.g. the length being drawn). */
   readout: { at: Vec3; text: string } | null;
-  /** A pull being dragged: the shape, how far, and the solid it replaces (if any). */
-  pull: { shape: SketchShape; distance: number; replacesFeatureId?: string } | null;
+  /** A pull being dragged: the shape, how far, the solid it replaces (if
+   *  any), and whether it cuts into the solid it was drawn on. */
+  pull: { shape: SketchShape; distance: number; replacesFeatureId?: string; cut?: boolean } | null;
+  /** The angle of the line being drawn, measured from level: a dashed level
+   *  line from the corner toward `levelDeg` (0 or 180), and an arc to the line. */
+  angle?: { plane: SketchPlane; at: Vec2; levelDeg: number; dirDeg: number; text: string } | null;
 }
 
-export type Pick = { shapeId: string } | { featureId: string } | null;
+/** A solid under the pointer: which one, where, and the face it was hit on. */
+export interface SolidHit {
+  /** The solid's first pull, and every pull that built it. */
+  featureId: string;
+  featureIds: string[];
+  point: Vec3;
+  /** Out of the solid. */
+  normal: Vec3;
+  /** Whether the face is flat (only flat faces can be drawn on). */
+  planar: boolean;
+}
+
+export type Pick = { shapeId: string } | { solid: SolidHit } | null;
 
 interface Theme { background: number; line: number; selected: number; preview: number; gridMinor: number; gridMajor: number; solid: number; edge: number }
 const LIGHT: Theme = { background: 0xf8fafc, line: 0x1e293b, selected: 0x2563eb, preview: 0xc026d3, gridMinor: 0xe2e8f0, gridMajor: 0xcbd5e1, solid: 0xe7e5e4, edge: 0x334155 };
 const DARK: Theme = { background: 0x0f172a, line: 0xe2e8f0, selected: 0x60a5fa, preview: 0xe879f9, gridMinor: 0x1e293b, gridMajor: 0x334155, solid: 0xa8a29e, edge: 0x0f172a };
+const GUIDE_COLOR = 0x0891b2;
+const CUT_COLOR = 0xdc2626;
 
 const v3 = (p: Vec3) => new THREE.Vector3(p[0], p[1], p[2]);
 
 /** The matrix taking sketch-plane coordinates (x, y, along-normal) to the world. */
-const planeMatrix = (plane: PlaneId): THREE.Matrix4 => {
-  const f = PLANES[plane];
+const planeMatrix = (plane: SketchPlane): THREE.Matrix4 => {
+  const f = frameOf(plane);
   return new THREE.Matrix4().makeBasis(v3(f.xDir), v3(f.yDir), v3(f.normal)).setPosition(v3(f.origin));
 };
 
@@ -63,7 +90,7 @@ const threeShape = (s: SketchShape): THREE.Shape => {
   return new THREE.Shape(pts.map(p => new THREE.Vector2(p.x, p.y)));
 };
 
-const labelEl = (text: string, cls: 'dim' | 'readout' | 'pull'): HTMLDivElement => {
+const labelEl = (text: string, cls: 'dim' | 'readout' | 'pull' | 'cut' | 'angle'): HTMLDivElement => {
   const el = document.createElement('div');
   el.textContent = text;
   el.className = `sketch-label sketch-label-${cls}`;
@@ -74,7 +101,10 @@ export class SketchScene {
   private renderer: THREE.WebGLRenderer;
   private labels: CSS2DRenderer;
   private scene = new THREE.Scene();
-  private camera: THREE.OrthographicCamera;
+  private ortho: THREE.OrthographicCamera;
+  private persp: THREE.PerspectiveCamera;
+  private camera: THREE.OrthographicCamera | THREE.PerspectiveCamera;
+  private perspective = false;
   private controls: OrbitControls;
   private grid = new THREE.Group();
   private content = new THREE.Group();
@@ -83,7 +113,7 @@ export class SketchScene {
   private theme: Theme;
   private frameHeight = 1200; // mm visible top to bottom at zoom 1
   private view: ViewName = 'iso';
-  private workPlane: PlaneId | null = 'ground';
+  private workPlane: SketchPlane = 'ground';
   private units: SketchUnits = 'imperial';
   private pickables: THREE.Object3D[] = [];
   private renderQueued = false;
@@ -91,7 +121,7 @@ export class SketchScene {
   /** Called when the zoom or view changes, so the editor can re-snap to the new grid. */
   onCameraChange: (() => void) | null = null;
 
-  constructor(private container: HTMLElement, opts: { dark: boolean }) {
+  constructor(private container: HTMLElement, opts: { dark: boolean; view?: ViewName; perspective?: boolean }) {
     this.theme = opts.dark ? DARK : LIGHT;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -102,12 +132,21 @@ export class SketchScene {
     Object.assign(this.labels.domElement.style, { position: 'absolute', inset: '0', pointerEvents: 'none' });
     container.appendChild(this.labels.domElement);
 
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 3);
-    this.camera.up.set(0, 0, 1);
+    this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, CAMERA_DISTANCE * 3);
+    this.ortho.up.set(0, 0, 1);
+    this.persp = new THREE.PerspectiveCamera(FOV_DEG, 1, 1, CAMERA_DISTANCE);
+    this.persp.up.set(0, 0, 1);
+    this.camera = this.ortho;
+    this.perspective = !!opts.perspective;
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.zoomToCursor = true;
-    this.controls.addEventListener('change', () => { this.rebuildGrid(); this.requestRender(); this.onCameraChange?.(); });
+    this.controls.addEventListener('change', () => {
+      this.fitClipping();
+      this.rebuildGrid();
+      this.requestRender();
+      this.onCameraChange?.();
+    });
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.6));
     const sun = new THREE.DirectionalLight(0xffffff, 1.8);
@@ -122,7 +161,7 @@ export class SketchScene {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
-    this.setView('iso');
+    this.setView(opts.view ?? 'iso');
   }
 
   dispose(): void {
@@ -150,20 +189,76 @@ export class SketchScene {
 
   get currentView(): ViewName { return this.view; }
 
+  /** How tall (in mm) the view is at the point it turns around. */
+  private visibleHeight(): number {
+    if (this.camera === this.persp) return 2 * this.persp.position.distanceTo(this.controls.target) * TAN_HALF_FOV;
+    return this.frameHeight / this.ortho.zoom;
+  }
+
+  /** Keeps the perspective camera's near and far planes around what it looks at. */
+  private fitClipping(): void {
+    if (this.camera !== this.persp) return;
+    const d = this.persp.position.distanceTo(this.controls.target);
+    this.persp.near = Math.max(0.1, d / 500);
+    this.persp.far = d * 60 + 10_000;
+    this.persp.updateProjectionMatrix();
+  }
+
+  private viewFrame(view: ViewName): { dir: THREE.Vector3; up: THREE.Vector3 } {
+    if (view === 'plane') {
+      const f = frameOf(this.workPlane);
+      return { dir: v3(f.normal).normalize(), up: v3(f.yDir) };
+    }
+    return { dir: v3(VIEWS[view].dir).normalize(), up: v3(VIEWS[view].up) };
+  }
+
+  /** Turns to a view, keeping the zoom. The 3D view uses perspective when that is on. */
   setView(view: ViewName): void {
+    const height = this.visibleHeight();
     this.view = view;
-    const { dir, up } = VIEWS[view];
-    const d = v3(dir).normalize();
-    this.camera.up.copy(v3(up));
-    this.camera.position.copy(this.controls.target).addScaledVector(d, CAMERA_DISTANCE);
+    const camera = view === 'iso' && this.perspective ? this.persp : this.ortho;
+    if (camera !== this.camera) {
+      this.camera = camera;
+      this.controls.object = camera;
+    }
+    const { dir, up } = this.viewFrame(view);
+    this.camera.up.copy(up);
+    const distance = camera === this.persp ? height / (2 * TAN_HALF_FOV) : CAMERA_DISTANCE;
+    this.camera.position.copy(this.controls.target).addScaledVector(dir, distance);
     this.camera.lookAt(this.controls.target);
+    if (camera === this.ortho) this.ortho.zoom = this.frameHeight / height;
     // OrbitControls fixes its orbit axis from camera.up when built; the 3D view
     // orbits around z, the flat views do not orbit at all.
     this.controls.enableRotate = view === 'iso';
     this.camera.updateProjectionMatrix();
+    this.fitClipping();
     this.controls.update();
     this.rebuildGrid();
     this.requestRender();
+  }
+
+  /** Perspective (things further away look smaller) for the 3D view; the flat views stay true to size. */
+  setPerspective(on: boolean): void {
+    if (on === this.perspective) return;
+    this.perspective = on;
+    if (this.view === 'iso') {
+      // Keep looking from the same direction, only the projection changes.
+      const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+      this.setView('iso');
+      const distance = this.camera === this.persp ? this.visibleHeight() / (2 * TAN_HALF_FOV) : CAMERA_DISTANCE;
+      this.camera.position.copy(this.controls.target).addScaledVector(dir, distance);
+      this.camera.lookAt(this.controls.target);
+      this.fitClipping();
+      this.controls.update();
+      this.requestRender();
+    }
+  }
+
+  /** Whether the camera looks straight along a plane's normal (so nothing can be pulled toward you). */
+  facesPlane(plane: SketchPlane): boolean {
+    const look = new THREE.Vector3();
+    this.camera.getWorldDirection(look);
+    return Math.abs(look.dot(v3(frameOf(plane).normal))) > 0.999;
   }
 
   /** How the pointer drives the view: drawing keeps one finger / the left
@@ -193,24 +288,28 @@ export class SketchScene {
     this.setView(this.view);
     const corners = [0, 1].flatMap(i => [0, 1].flatMap(j => [0, 1].map(k => new THREE.Vector3(
       i ? box.max.x : box.min.x, j ? box.max.y : box.min.y, k ? box.max.z : box.min.z))));
-    const inv = this.camera.matrixWorldInverse;
     this.camera.updateMatrixWorld();
+    const inv = this.camera.matrixWorldInverse;
     const local = corners.map(c => c.clone().applyMatrix4(inv));
     const w = Math.max(...local.map(c => c.x)) - Math.min(...local.map(c => c.x));
     const h = Math.max(...local.map(c => c.y)) - Math.min(...local.map(c => c.y));
-    const aspect = this.aspect();
-    const needed = Math.max(h, w / aspect, 1) * 1.35;
-    this.camera.zoom = this.frameHeight / needed;
+    const needed = Math.max(h, w / this.aspect(), 1) * 1.35;
+    if (this.camera === this.persp) {
+      const dir = this.persp.position.clone().sub(this.controls.target).normalize();
+      this.persp.position.copy(this.controls.target).addScaledVector(dir, needed / (2 * TAN_HALF_FOV) + Math.max(w, h) / 2);
+      this.fitClipping();
+    } else {
+      this.ortho.zoom = this.frameHeight / needed;
+    }
     this.camera.updateProjectionMatrix();
     this.controls.update();
     this.rebuildGrid();
     this.requestRender();
   }
 
-  /** Screen pixels per world millimetre at the current zoom. */
+  /** Screen pixels per world millimetre (at the point the view turns around). */
   pxPerMm(): number {
-    const h = this.container.clientHeight || 1;
-    return (h * this.camera.zoom) / this.frameHeight;
+    return (this.container.clientHeight || 1) / this.visibleHeight();
   }
 
   private aspect(): number {
@@ -223,8 +322,10 @@ export class SketchScene {
     this.renderer.setSize(w, h);
     this.labels.setSize(w, h);
     const a = w / h, half = this.frameHeight / 2;
-    Object.assign(this.camera, { left: -half * a, right: half * a, top: half, bottom: -half });
-    this.camera.updateProjectionMatrix();
+    Object.assign(this.ortho, { left: -half * a, right: half * a, top: half, bottom: -half });
+    this.ortho.updateProjectionMatrix();
+    this.persp.aspect = a;
+    this.persp.updateProjectionMatrix();
     this.rebuildGrid();
     this.requestRender();
   }
@@ -239,9 +340,9 @@ export class SketchScene {
   }
 
   /** Where the pointer meets a work plane, in that plane's coordinates. */
-  planePoint(clientX: number, clientY: number, plane: PlaneId): Vec2 | null {
+  planePoint(clientX: number, clientY: number, plane: SketchPlane): Vec2 | null {
     const ray = this.rayAt(clientX, clientY);
-    const f = PLANES[plane];
+    const f = frameOf(plane);
     const hit = ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(v3(f.normal), v3(f.origin)), new THREE.Vector3());
     if (!hit) return null;
     const rel = hit.sub(v3(f.origin));
@@ -249,17 +350,36 @@ export class SketchScene {
   }
 
   /** The shape or solid under the pointer. */
-  pick(clientX: number, clientY: number): Pick {
+  pick(clientX: number, clientY: number, only?: 'solids'): Pick {
     this.rayAt(clientX, clientY);
-    this.raycaster.params.Line = { threshold: 6 / this.pxPerMm() };
-    const hits = this.raycaster.intersectObjects(this.pickables, false);
+    const px = this.pxPerMm();
+    this.raycaster.params.Line = { threshold: 6 / px };
+    const hits = this.raycaster.intersectObjects(only === 'solids' ? this.pickables.filter(o => o.userData.solid) : this.pickables, false);
+    if (!hits.length) return null;
     // Lines and fills before solids at the same depth: a sketch drawn on a face stays pickable.
-    const hit = hits.find(h => h.object.userData.shapeId) ?? hits[0];
-    if (!hit) return null;
-    const { shapeId, featureId } = hit.object.userData as { shapeId?: string; featureId?: string };
-    if (featureId) return { featureId };
+    const reach = hits[0].distance + Math.max(0.5, 2 / px);
+    const hit = hits.find(h => h.object.userData.shapeId && h.distance <= reach) ?? hits[0];
+    const { shapeId, solid } = hit.object.userData as { shapeId?: string; solid?: SolidMesh };
+    if (solid) return { solid: this.solidHit(solid, hit) };
     if (shapeId) return { shapeId };
     return null;
+  }
+
+  private solidHit(solid: SolidMesh, hit: THREE.Intersection): SolidHit {
+    const at = (hit.faceIndex ?? 0) * 3;
+    let start = 0, count = solid.indices.length;
+    for (let r = 0; r < solid.faceRuns.length; r += 2) {
+      if (at >= solid.faceRuns[r] && at < solid.faceRuns[r] + solid.faceRuns[r + 1]) { start = solid.faceRuns[r]; count = solid.faceRuns[r + 1]; break; }
+    }
+    const nrm = (k: number) => new THREE.Vector3(solid.normals[3 * k], solid.normals[3 * k + 1], solid.normals[3 * k + 2]);
+    const n0 = nrm(solid.indices[start]);
+    let planar = true;
+    for (let i = start; i < start + count && planar; i++) planar = nrm(solid.indices[i]).dot(n0) > 0.99999;
+    const n = planar ? n0.normalize() : (hit.face?.normal ?? n0).clone().normalize();
+    return {
+      featureId: solid.featureId, featureIds: solid.featureIds,
+      point: [hit.point.x, hit.point.y, hit.point.z], normal: [n.x, n.y, n.z], planar,
+    };
   }
 
   /** How far along its plane's normal the pointer is from a shape (for Pull), or null when looking straight down the normal. */
@@ -268,7 +388,7 @@ export class SketchScene {
     const outline = shapeOutline(shape, 8);
     const c = outline.reduce((a, p) => ({ x: a.x + p.x / outline.length, y: a.y + p.y / outline.length }), { x: 0, y: 0 });
     const p0 = v3(toWorld(shape.plane, c));
-    const n = v3(PLANES[shape.plane].normal);
+    const n = v3(frameOf(shape.plane).normal);
     const d = ray.direction;
     const b = n.dot(d);
     const denom = 1 - b * b;
@@ -279,7 +399,7 @@ export class SketchScene {
 
   // ── Drawing ───────────────────────────────────────────────────────────────
 
-  setWorkPlane(plane: PlaneId | null): void {
+  setWorkPlane(plane: SketchPlane): void {
     this.workPlane = plane;
     this.rebuildGrid();
     this.requestRender();
@@ -316,24 +436,42 @@ export class SketchScene {
       g.setAttribute('position', new THREE.BufferAttribute(solid.positions, 3));
       g.setAttribute('normal', new THREE.BufferAttribute(solid.normals, 3));
       g.setIndex(new THREE.BufferAttribute(solid.indices, 1));
-      const selected = solid.featureId === c.selectedFeatureId;
+      const selected = !!c.selectedFeatureId && solid.featureIds.includes(c.selectedFeatureId);
       const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-        color: selected ? t.selected : t.solid, roughness: 0.85, metalness: 0,
-        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+        color: t.solid, emissive: selected ? t.selected : 0x000000, emissiveIntensity: selected ? 0.18 : 0,
+        roughness: 0.85, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
       }));
       mesh.userData.featureId = solid.featureId;
+      mesh.userData.featureIds = solid.featureIds;
+      mesh.userData.solid = solid;
+      mesh.renderOrder = -2;
       this.content.add(mesh);
       this.pickables.push(mesh);
       const eg = new THREE.BufferGeometry();
       eg.setAttribute('position', new THREE.BufferAttribute(solid.edges, 3));
-      this.content.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: selected ? t.selected : t.edge })));
+      const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: t.edge }));
+      edges.userData.featureIds = solid.featureIds;
+      edges.renderOrder = -2;
+      this.content.add(edges);
       if (c.showDims) {
-        const f = c.doc.features.find(ff => ff.id === solid.featureId);
-        const shape = f && c.doc.shapes.find(s => s.id === f.shapeId);
-        if (f && shape) {
+        for (const id of solid.featureIds) {
+          const f = c.doc.features.find(ff => ff.id === id);
+          const shape = f && c.doc.shapes.find(s => s.id === f.shapeId);
+          if (!f || !shape) continue;
           this.addDims(shape);
-          this.addPullDim(shape, f.distance);
+          this.addPullDim(shape, f.distance, this.content, id !== solid.featureId && f.distance < 0);
         }
+      }
+    }
+    // The selected pull's outline, drawn over the solid so it is clear which part is picked.
+    const picked = c.selectedFeatureId && c.doc.features.find(f => f.id === c.selectedFeatureId);
+    const pickedShape = picked && c.doc.shapes.find(s => s.id === picked.shapeId);
+    if (picked && pickedShape) {
+      for (const end of [0, picked.distance]) {
+        const line = this.outlineLine(pickedShape, t.selected, end);
+        (line.material as THREE.LineBasicMaterial).depthTest = false;
+        line.renderOrder = 2;
+        this.content.add(line);
       }
     }
     this.requestRender();
@@ -345,24 +483,31 @@ export class SketchScene {
     if (p.shape) {
       const line = this.outlineLine(p.shape, t.preview);
       this.preview.add(line);
-      this.addDims(p.shape, this.preview);
+      // The line being drawn has its length in the readout already.
+      this.addDims(p.shape, this.preview, !!p.angle);
     }
+    for (const o of this.content.children) o.visible = true;
     if (p.pull) {
       const depth = Math.abs(p.pull.distance);
       if (depth > 1e-6) {
         const geo = new THREE.ExtrudeGeometry(threeShape(p.pull.shape), { depth, bevelEnabled: false, curveSegments: 24 });
         if (p.pull.distance < 0) geo.translate(0, 0, -depth);
-        const ghost = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: t.preview, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+        // A cut shows through the solid it cuts into.
+        const ghost = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: p.pull.cut ? CUT_COLOR : t.preview, transparent: true, opacity: p.pull.cut ? 0.35 : 0.45,
+          side: THREE.DoubleSide, depthWrite: false, depthTest: !p.pull.cut,
+        }));
         ghost.applyMatrix4(planeMatrix(p.pull.shape.plane));
+        ghost.renderOrder = 3;
         this.preview.add(ghost);
       }
-      this.addPullDim(p.pull.shape, p.pull.distance, this.preview);
-      // Hide the solid being re-pulled while its ghost stands in for it.
+      this.addPullDim(p.pull.shape, p.pull.distance, this.preview, p.pull.cut);
+      // Hide a solid being re-pulled while its ghost stands in for it (only
+      // when it is that pull alone: a solid with parts joined or cut stays).
       for (const o of this.content.children) {
-        if (o.userData.featureId === p.pull.replacesFeatureId) o.visible = false;
+        const ids = o.userData.featureIds as string[] | undefined;
+        if (ids && ids.length === 1 && ids[0] === p.pull.replacesFeatureId) o.visible = false;
       }
-    } else {
-      for (const o of this.content.children) o.visible = true;
     }
     if (p.snap) {
       const el = document.createElement('div');
@@ -370,7 +515,9 @@ export class SketchScene {
       const obj = new CSS2DObject(el);
       obj.position.copy(v3(toWorld(p.snap.plane, p.snap.p)));
       this.preview.add(obj);
+      for (const g of p.snap.guides ?? []) this.preview.add(this.dashed([g, p.snap.p], p.snap.plane, GUIDE_COLOR));
     }
+    if (p.angle) this.addAngle(p.angle);
     if (p.readout) {
       const obj = new CSS2DObject(labelEl(p.readout.text, 'readout'));
       obj.position.copy(v3(p.readout.at));
@@ -388,14 +535,47 @@ export class SketchScene {
 
   // ── Internals ─────────────────────────────────────────────────────────────
 
-  private outlineLine(s: SketchShape, color: number): THREE.Line {
-    const pts = shapeOutline(s, 32).map(p => v3(toWorld(s.plane, p)));
+  /** A shape's outline, or (with `lift`) the same outline that far along its plane's normal. */
+  private outlineLine(s: SketchShape, color: number, lift = 0): THREE.Line {
+    const n = v3(frameOf(s.plane).normal).multiplyScalar(lift);
+    const pts = shapeOutline(s, 32).map(p => v3(toWorld(s.plane, p)).add(n));
     const g = new THREE.BufferGeometry().setFromPoints(pts);
     return new THREE.Line(g, new THREE.LineBasicMaterial({ color }));
   }
 
-  /** Lengths of a shape's straight segments, arc radii and a circle's diameter. */
-  private addDims(s: SketchShape, into: THREE.Group = this.content): void {
+  /** A dashed line through sketch-plane points, dashes about 6 px long whatever the zoom. */
+  private dashed(pts: Vec2[], plane: SketchPlane, color: number): THREE.Line {
+    const px = this.pxPerMm();
+    const g = new THREE.BufferGeometry().setFromPoints(pts.map(p => v3(toWorld(plane, p))));
+    const line = new THREE.Line(g, new THREE.LineDashedMaterial({ color, dashSize: 6 / px, gapSize: 4 / px, depthTest: false }));
+    line.computeLineDistances();
+    line.renderOrder = 4;
+    return line;
+  }
+
+  /** The angle of the line being drawn: a dashed level line and an arc from it, labelled. */
+  private addAngle(a: NonNullable<ScenePreview['angle']>): void {
+    const r = 44 / this.pxPerMm();
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const at = (deg: number, dist: number): Vec2 => ({ x: a.at.x + dist * Math.cos(rad(deg)), y: a.at.y + dist * Math.sin(rad(deg)) });
+    this.preview.add(this.dashed([a.at, at(a.levelDeg, r * 1.6)], a.plane, this.theme.preview));
+    let sweep = ((a.dirDeg - a.levelDeg) % 360 + 540) % 360 - 180; // the short way round, −180 to 180
+    if (Math.abs(sweep) < 0.5) sweep = 0;
+    if (sweep !== 0) {
+      const steps = Math.max(4, Math.ceil(Math.abs(sweep) / 4));
+      const pts = Array.from({ length: steps + 1 }, (_, i) => at(a.levelDeg + (sweep * i) / steps, r));
+      const g = new THREE.BufferGeometry().setFromPoints(pts.map(p => v3(toWorld(a.plane, p))));
+      const arc = new THREE.Line(g, new THREE.LineBasicMaterial({ color: this.theme.preview, depthTest: false }));
+      arc.renderOrder = 4;
+      this.preview.add(arc);
+    }
+    const label = new CSS2DObject(labelEl(a.text, 'angle'));
+    label.position.copy(v3(toWorld(a.plane, at(a.levelDeg + sweep / 2, r * 1.45))));
+    this.preview.add(label);
+  }
+
+  /** Lengths of a shape's straight segments, arc radii and a circle's diameter (all but the last segment's, with `skipLast`). */
+  private addDims(s: SketchShape, into: THREE.Group = this.content, skipLast = false): void {
     const add = (p: Vec2, text: string) => {
       const obj = new CSS2DObject(labelEl(text, 'dim'));
       obj.position.copy(v3(toWorld(s.plane, p)));
@@ -406,7 +586,8 @@ export class SketchScene {
       return;
     }
     let prev = s.start;
-    for (const seg of s.segments) {
+    const segments = skipLast ? s.segments.slice(0, -1) : s.segments;
+    for (const seg of segments) {
       if (seg.kind === 'line') {
         const len = Math.hypot(seg.to.x - prev.x, seg.to.y - prev.y);
         if (len > 1e-6) add({ x: (prev.x + seg.to.x) / 2, y: (prev.y + seg.to.y) / 2 }, formatLength(len, this.units));
@@ -419,12 +600,12 @@ export class SketchScene {
     }
   }
 
-  private addPullDim(s: SketchShape, distance: number, into: THREE.Group = this.content): void {
+  private addPullDim(s: SketchShape, distance: number, into: THREE.Group = this.content, cut = false): void {
     const outline = shapeOutline(s, 8);
     const a = outline[0];
-    const n = v3(PLANES[s.plane].normal);
+    const n = v3(frameOf(s.plane).normal);
     const pos = v3(toWorld(s.plane, a)).addScaledVector(n, distance / 2);
-    const obj = new CSS2DObject(labelEl(`↕ ${formatLength(Math.abs(distance), this.units)}`, 'pull'));
+    const obj = new CSS2DObject(labelEl(`${cut ? 'Cut' : '↕'} ${formatLength(Math.abs(distance), this.units)}`, cut ? 'cut' : 'pull'));
     obj.position.copy(pos);
     into.add(obj);
   }
@@ -432,20 +613,39 @@ export class SketchScene {
   private rebuildGrid(): void {
     this.clear(this.grid);
     const t = this.theme;
-    const plane = this.workPlane ?? 'ground';
+    const plane = this.workPlane;
     const pxPerMm = this.pxPerMm();
     const step = gridStep(this.units, pxPerMm);
     const major = majorEvery(this.units, step);
-    // Cover what the camera can see of the plane around the target.
-    const halfView = (this.frameHeight / this.camera.zoom) * Math.max(this.aspect(), 1) * 1.2;
-    const f = PLANES[plane];
+    // Cover what the camera can see of the plane around the target (further in perspective, toward the horizon).
+    const halfView = this.visibleHeight() * Math.max(this.aspect(), 1) * (this.camera === this.persp ? 2.5 : 1.2);
+    const f = frameOf(plane);
     const rel = this.controls.target.clone().sub(v3(f.origin));
     const cx = rel.dot(v3(f.xDir)), cy = rel.dot(v3(f.yDir));
     const n0x = Math.floor((cx - halfView) / step), n1x = Math.ceil((cx + halfView) / step);
     const n0y = Math.floor((cy - halfView) / step), n1y = Math.ceil((cy + halfView) / step);
     if ((n1x - n0x) + (n1y - n0y) > 2000) return;
     const minor: number[] = [], majorPts: number[] = [], axisX: number[] = [], axisY: number[] = [];
-    const push = (arr: number[], a: Vec2, b: Vec2) => arr.push(...toWorld(plane, a), ...toWorld(plane, b));
+    // In perspective the camera sits close to the grid, and a line running behind
+    // it is not drawn at all, so each line is cut back to the part in front of it.
+    const persp = this.camera === this.persp;
+    const eye = this.camera.position, look = this.camera.getWorldDirection(new THREE.Vector3());
+    const minDepth = this.persp.near * 2;
+    const depth = (p: Vec3) => (p[0] - eye.x) * look.x + (p[1] - eye.y) * look.y + (p[2] - eye.z) * look.z - minDepth;
+    const push = (arr: number[], a: Vec2, b: Vec2) => {
+      let pa = toWorld(plane, a), pb = toWorld(plane, b);
+      if (persp) {
+        const da = depth(pa), db = depth(pb);
+        if (da <= 0 && db <= 0) return;
+        const cut = (from: Vec3, to: Vec3, df: number, dt: number): Vec3 => {
+          const t = df / (df - dt);
+          return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t];
+        };
+        if (da < 0) pa = cut(pb, pa, db, da);
+        else if (db < 0) pb = cut(pa, pb, da, db);
+      }
+      arr.push(...pa, ...pb);
+    };
     for (let i = n0x; i <= n1x; i++) {
       const x = i * step;
       push(i === 0 ? axisY : i % major === 0 ? majorPts : minor, { x, y: n0y * step }, { x, y: n1y * step });
@@ -454,11 +654,15 @@ export class SketchScene {
       const y = j * step;
       push(j === 0 ? axisX : j % major === 0 ? majorPts : minor, { x: n0x * step, y }, { x: n1x * step, y });
     }
+    // Looking straight at the work plane, the grid is drawn after the solids so
+    // it shows on a face being drawn on (and is still hidden behind solids in
+    // front of the plane); at an angle it stays behind every solid.
+    const gridOrder = this.facesPlane(plane) ? -1 : -3;
     const seg = (arr: number[], color: number, opacity = 1) => {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
       const m = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity, depthWrite: false }));
-      m.renderOrder = -1;
+      m.renderOrder = gridOrder;
       this.grid.add(m);
     };
     seg(minor, t.gridMinor);

@@ -29,6 +29,18 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch: a new sketch opens looking straight at the Front plane, a flat grid ready to draw on.',
+      'Sketch: Backspace takes back the last point while drawing, as many times as you like, even right after typing a length.',
+      'Sketch: hold Shift to line up with what is already drawn: points snap to ends, midpoints and centres, onto lines and where lines cross, and dashed guides run level or plumb from existing points. Hold Ctrl to keep a line to 15° steps (level, plumb, 30°, 45°, 60°…). Both have on/off buttons in the toolbar for tablets. Lines no longer jump to 45° on their own.',
+      'Sketch: a typed angle is now measured from level, toward the side the pointer is on (45 with the pointer up and to the left goes up-left). The line shows where it will land as you type, before you press Enter, with the angle marked at the corner.',
+      'Sketch: draw on a solid. Pick Face next to Front, Side and Ground, then click a flat face: the view turns to look straight at it with its own grid. A shape drawn there joins the solid when pulled out and cuts a pocket, groove or hole when pulled in. Deleting a solid removes what was drawn on it, and pulling a solid further carries what is on its end along.',
+      'Sketch: a Perspective button for the 3D view. Top, Front and Side stay flat so lengths read true.',
+    ],
+  },
+  {
     version: '4.6.8',
     date: 'October 29, 2026',
     changes: [

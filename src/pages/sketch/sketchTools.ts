@@ -4,7 +4,7 @@
 // on, and sometimes finishes a shape.
 import {
   dist2, rectanglePath, samePoint,
-  type CircleShape, type PathSegment, type PathShape, type PlaneId, type SketchShape, type Vec2,
+  type CircleShape, type PathSegment, type PathShape, type SketchPlane, type SketchShape, type Vec2,
 } from './sketchModel';
 import { pointAt } from './sketchSnap';
 
@@ -12,9 +12,9 @@ export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull';
 
 export type Draft =
   /** A chain of lines and arcs. `arcThrough` is set while an arc waits for its end. */
-  | { tool: 'line'; plane: PlaneId; start: Vec2; segments: PathSegment[]; arcThrough?: Vec2 }
-  | { tool: 'rect'; plane: PlaneId; a: Vec2 }
-  | { tool: 'circle'; plane: PlaneId; center: Vec2 }
+  | { tool: 'line'; plane: SketchPlane; start: Vec2; segments: PathSegment[]; arcThrough?: Vec2 }
+  | { tool: 'rect'; plane: SketchPlane; a: Vec2 }
+  | { tool: 'circle'; plane: SketchPlane; center: Vec2 }
   /** Pulling a shape (featureId set when re-pulling an existing solid). */
   | { tool: 'pull'; shapeId: string; featureId?: string; distance: number };
 
@@ -26,7 +26,7 @@ const lastPoint = (d: Extract<Draft, { tool: 'line' }>): Vec2 =>
 /** A click with the Line tool. In arc mode the first click sets a point the
  *  arc passes through and the second its end. Landing back on the start
  *  closes the shape. */
-export const lineClick = (draft: Draft | null, p: Vec2, plane: PlaneId, arcMode: boolean, newId: () => string): Step => {
+export const lineClick = (draft: Draft | null, p: Vec2, plane: SketchPlane, arcMode: boolean, newId: () => string): Step => {
   if (!draft || draft.tool !== 'line') return { draft: { tool: 'line', plane, start: p, segments: [] } };
   const prev = lastPoint(draft);
   if (samePoint(prev, p)) return { draft };
@@ -70,7 +70,7 @@ export const lineTyped = (draft: Draft | null, length: number, angleDeg: number,
   return lineClick({ ...draft, arcThrough: undefined }, p, draft.plane, false, newId);
 };
 
-export const rectClick = (draft: Draft | null, p: Vec2, plane: PlaneId, newId: () => string): Step => {
+export const rectClick = (draft: Draft | null, p: Vec2, plane: SketchPlane, newId: () => string): Step => {
   if (!draft || draft.tool !== 'rect') return { draft: { tool: 'rect', plane, a: p } };
   if (Math.abs(p.x - draft.a.x) < 1e-6 || Math.abs(p.y - draft.a.y) < 1e-6) return { draft };
   return { draft: null, commit: rectanglePath(newId(), draft.plane, draft.a, p) };
@@ -84,7 +84,7 @@ export const rectTyped = (draft: Draft | null, width: number, height: number, to
   return rectClick(draft, { x: draft.a.x + sx * Math.abs(width), y: draft.a.y + sy * Math.abs(height) }, draft.plane, newId);
 };
 
-export const circleClick = (draft: Draft | null, p: Vec2, plane: PlaneId, newId: () => string): Step => {
+export const circleClick = (draft: Draft | null, p: Vec2, plane: SketchPlane, newId: () => string): Step => {
   if (!draft || draft.tool !== 'circle') return { draft: { tool: 'circle', plane, center: p } };
   return circleTyped(draft, dist2(draft.center, p), newId);
 };

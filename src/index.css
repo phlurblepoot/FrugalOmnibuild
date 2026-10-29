@@ -456,3 +456,16 @@ html {
 }
 .sketch-snap-point { border-color: #16a34a; background: #16a34a55; }
 .sketch-snap-angle { border-color: #c026d3; }
+/* Shift snaps: crossings are squares, a point on an outline a diamond, a guide a ring in the guide colour. */
+.sketch-snap-cross { border-color: #ea580c; border-radius: 1px; background: #ea580c40; }
+.sketch-snap-line { border-color: #ea580c; border-radius: 1px; transform: rotate(45deg); }
+.sketch-snap-guide { border-color: #0891b2; }
+.sketch-label-angle {
+  color: #a21caf;
+  background: color-mix(in oklab, var(--raised) 90%, transparent);
+  border: 1px solid #e879f9;
+}
+.sketch-label-cut {
+  color: #fff;
+  background: #dc2626;
+}
