@@ -29,6 +29,13 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.8',
+    date: 'October 29, 2026',
+    changes: [
+      'Fix: saving a new version of a file now checks that you may see that file. Someone who may not (another person\'s signature, or a billing document for someone who isn\'t an admin) gets "File not found" and the file is left as it was.',
+    ],
+  },
+  {
     version: '4.6.7',
     date: 'October 29, 2026',
     changes: [
