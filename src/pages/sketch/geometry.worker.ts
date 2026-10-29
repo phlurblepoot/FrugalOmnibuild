@@ -8,9 +8,9 @@
 import opencascade from 'replicad-opencascadejs';
 // @ts-ignore — Vite turns ?url imports into the emitted asset's URL
 import wasmUrl from 'replicad-opencascadejs/wasm?url';
-import { setOC, draw, drawCircle, genericSweep, Plane, type Drawing } from 'replicad';
+import { setOC, draw, drawCircle, genericSweep, makeCompound, makeProjectedEdges, Plane, ProjectionCamera, type Drawing } from 'replicad';
 import { frameOf, planSolids, type Recipe, type SketchDoc, type SketchShape, type Transform, type Vec3 } from './sketchModel';
-import type { BuildRequest, BuildResponse, SolidMesh } from './geometryTypes';
+import type { BuildRequest, BuildResponse, ProjectRequest, ProjectResponse, ProjectedView, SolidMesh } from './geometryTypes';
 
 let engine: Promise<void> | null = null;
 const loadEngine = () => (engine ??= (async () => {
@@ -189,7 +189,60 @@ const build = (doc: SketchDoc): Omit<BuildResponse, 'requestId'> => {
   return { solids, errors };
 };
 
-self.onmessage = async (event: MessageEvent<BuildRequest>) => {
+interface PointLike { x: number; y: number; delete(): void }
+interface EdgeLike {
+  geomType: string;
+  length: number;
+  startPoint: PointLike;
+  endPoint: PointLike;
+  pointAt(position: number): PointLike;
+  delete(): void;
+}
+
+/** An edge of a projection as a polyline: straight ones by their ends, curves every 1.5 mm or so. */
+const edgePolyline = (e: EdgeLike): number[] => {
+  const read = (p: PointLike) => { const xy = [p.x, p.y]; p.delete(); return xy; };
+  if (e.geomType === 'LINE') return [...read(e.startPoint), ...read(e.endPoint)];
+  const n = Math.min(256, Math.max(12, Math.ceil(e.length / 1.5)));
+  const out: number[] = [];
+  for (let i = 0; i <= n; i++) out.push(...read(e.pointAt(i / n)));
+  return out;
+};
+
+/** The sketch's solids seen from each view, hidden edges worked out by OpenCascade. */
+const project = (doc: SketchDoc, views: ProjectRequest['views']): ProjectedView[] => {
+  const errors: Errors = [];
+  const solids = planSolids(doc).solids.map(p => make(p.recipe, errors)).filter((x): x is SolidLike => !!x);
+  try {
+    if (!solids.length) return views.map(v => ({ name: v.name, visible: [], hidden: [] }));
+    const all = makeCompound(solids as never) as unknown as SolidLike;
+    try {
+      return views.map(v => {
+        const { visible, hidden } = makeProjectedEdges(all as never, new ProjectionCamera([0, 0, 0], v.dir, v.xAxis), v.hidden) as unknown as { visible: EdgeLike[]; hidden: EdgeLike[] };
+        const lines = (edges: EdgeLike[]) => edges.map(e => { try { return edgePolyline(e); } finally { e.delete(); } });
+        return { name: v.name, visible: lines(visible), hidden: lines(hidden) };
+      });
+    } finally {
+      all.delete();
+    }
+  } finally {
+    for (const s of solids) s.delete();
+    for (const s of made.values()) s.delete();
+    made = new Map();
+  }
+};
+
+self.onmessage = async (event: MessageEvent<BuildRequest | ProjectRequest>) => {
+  if (event.data.kind === 'project') {
+    const { requestId, doc, views } = event.data;
+    try {
+      await loadEngine();
+      (self as unknown as Worker).postMessage({ requestId, views: project(doc, views) } satisfies ProjectResponse);
+    } catch (e) {
+      (self as unknown as Worker).postMessage({ requestId, views: [], fatal: e instanceof Error ? e.message : String(e) } satisfies ProjectResponse);
+    }
+    return;
+  }
   const { requestId, doc } = event.data;
   try {
     await loadEngine();

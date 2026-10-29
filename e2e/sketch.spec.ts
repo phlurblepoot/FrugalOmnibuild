@@ -429,3 +429,60 @@ test('Sketch: reference photos are laid on the plane, scaled from a known length
   expect(saved.refs).toHaveLength(1);
   expect(saved.refs[0]).toMatchObject({ name: 'old-drawing.png', hidden: true });
 });
+
+test('Sketch: arc mode turns itself off after one arc; a drawing sheet exports to Documents and downloads', async ({ authedPage: page, apiToken, request }) => {
+  const auth = { Authorization: `Bearer ${apiToken.token}` };
+  await page.goto('/tools/sketch?new=1');
+  await page.getByLabel('Name').fill('Cornice C-3');
+  await page.getByTestId('new-sketch-create').click();
+  await expect(page).toHaveURL(/\/tools\/sketch\?fileId=/);
+  const box = await viewBox(page);
+  const cx = box.x + box.width / 2 - 150, cy = box.y + box.height / 2 + 80;
+  const typeLine = async (length: string, angle: string, toward: [number, number]) => {
+    await page.mouse.move(cx + toward[0], cy + toward[1]);
+    await page.getByTestId('sketch-typed-0').fill(length);
+    await page.getByTestId('sketch-typed-1').fill(angle);
+    await page.getByTestId('sketch-typed-1').press('Enter');
+  };
+
+  // A profile: 6" along the bottom, 2" up, an arc up and back, then straight lines home.
+  await page.getByTestId('sketch-tool-line').click();
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await typeLine('6', '0', [300, 0]);
+  await typeLine('2', '90', [250, -250]);
+  await page.getByTestId('sketch-arc').click();
+  await expect(page.getByTestId('sketch-arc')).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.click(cx + 150, cy - 140);
+  await page.mouse.click(cx + 100, cy - 170);
+  await expect(page.getByTestId('sketch-arc')).toHaveAttribute('aria-pressed', 'false');
+  await page.mouse.move(cx, cy - 170);
+  await page.mouse.click(cx, cy - 170);
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('Click to start');
+
+  // Pull it out a foot.
+  await page.getByTestId('sketch-tool-pull').click();
+  await page.mouse.click(cx + 40, cy - 30);
+  await page.getByTestId('sketch-typed-0').fill('12');
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.locator('.sketch-label-pull', { hasText: `1' - 0"` })).toBeVisible({ timeout: 60_000 });
+
+  // Export: Save to Documents, then Download.
+  await page.getByTestId('sketch-export').click();
+  await expect(page.getByTestId('sketch-export-modal')).toBeVisible();
+  await page.getByTestId('sketch-export-notes').fill('Run on site. Check against the existing.');
+  await page.getByTestId('sketch-export-save').click();
+  await expect(page.getByText('Saved to Documents as "Cornice C-3 - drawing.pdf".')).toBeVisible({ timeout: 60_000 });
+  const docs = await (await request.get('/api/documents?kinds=sketch-export', { headers: auth })).json();
+  const row = docs.rows.find((r: { name: string }) => r.name === 'Cornice C-3 - drawing.pdf');
+  expect(row).toBeTruthy();
+  const pdf = await (await request.get(`/api/files/${row.id}/content`, { headers: auth })).text();
+  expect(pdf.startsWith('%PDF')).toBe(true);
+  for (const s of ['FRONT', 'TOP', 'RIGHT SIDE', '3D VIEW', 'Cornice C-3', 'Run on site.', '6"', '2"']) expect(pdf).toContain(s);
+
+  await page.getByTestId('sketch-export').click();
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('sketch-export-download').click()]);
+  expect(download.suggestedFilename()).toBe('Cornice C-3 - drawing.pdf');
+});

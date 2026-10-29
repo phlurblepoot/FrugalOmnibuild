@@ -29,6 +29,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.4',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 3, part 1): Export makes a drawing sheet (PDF): Front, Top and Right side with hidden edges dashed, overall sizes dimensioned and the lengths of the profiles each view looks at, plus a 3D view, and a title block with your company, the sketch and project names, notes, date, units and scale. Pick the views, the 3D view\'s angle (the usual one, or as you have turned it) and size, the paper (Letter, 11 × 17, A4, A3) and the scale, then Download it or Save it to Documents (filed as a Sketch Export).',
+      'Sketch: the flat views share one standard scale and line up when that keeps them readable; for something long with a small profile, such as a cornice run, each view gets the largest scale that fits it, written under it. The 3D view only takes the room the flat views leave, up to the size you pick.',
+      'Sketch: Arc now turns itself off after one arc, back to straight lines.',
+    ],
+  },
+  {
     version: '4.6.9.3',
     date: 'October 29, 2026',
     changes: [

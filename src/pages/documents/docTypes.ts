@@ -53,6 +53,7 @@ const KIND_META: Record<string, KindMeta> = {
   'payment-attachment':  { label: 'Payment Attachment', tone: 'emerald' },
   sketch:                { label: 'Sketch',             tone: 'blue' },
   'sketch-photo':        { label: 'Sketch Reference',   tone: 'blue' },
+  'sketch-export':       { label: 'Sketch Export',      tone: 'blue' },
 };
 
 // Display order for the Type filter dropdown. 'plan' and 'settings-asset' are
@@ -87,7 +88,7 @@ export const DIRECT_UPLOAD_KINDS = ['document', 'spreadsheet', 'photo', 'other',
 // Client mirror of server/documents.ts's DELETABLE_GENERATED_KINDS: documents
 // with no owning record (made by the app, not uploaded), so they are deletable
 // (and shareable) straight from the Documents page.
-export const DELETABLE_GENERATED_KINDS = ['takeoff-print', 'takeoff-export', 'sketch', 'sketch-photo'] as const;
+export const DELETABLE_GENERATED_KINDS = ['takeoff-print', 'takeoff-export', 'sketch', 'sketch-photo', 'sketch-export'] as const;
 
 export const isDeletableGeneratedKind = (kind: string): boolean =>
   (DELETABLE_GENERATED_KINDS as readonly string[]).includes(kind);

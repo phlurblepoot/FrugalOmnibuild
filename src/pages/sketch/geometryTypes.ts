@@ -1,6 +1,6 @@
 // src/pages/sketch/geometryTypes.ts
 // Messages between the sketch editor and its geometry worker.
-import type { SketchDoc } from './sketchModel';
+import type { SketchDoc, Vec3 } from './sketchModel';
 
 /** One solid, as planned by planSolids. */
 export interface SolidMesh {
@@ -20,7 +20,17 @@ export interface SolidMesh {
   edges: Float32Array;
 }
 
-export interface BuildRequest { requestId: number; doc: SketchDoc }
+export interface BuildRequest { kind?: 'build'; requestId: number; doc: SketchDoc }
+
+/** A flat view to draw: looking against `dir` (it points from the model toward the viewer), x to the right. */
+export interface ViewSpec { name: string; dir: Vec3; xAxis: Vec3; hidden: boolean }
+
+/** A view's edges as polylines (x, y pairs in mm, x right and y up on the view), split into seen and hidden. */
+export interface ProjectedView { name: string; visible: number[][]; hidden: number[][] }
+
+export interface ProjectRequest { kind: 'project'; requestId: number; doc: SketchDoc; views: ViewSpec[] }
+
+export interface ProjectResponse { requestId: number; views: ProjectedView[]; fatal?: string }
 
 export interface BuildResponse {
   requestId: number;

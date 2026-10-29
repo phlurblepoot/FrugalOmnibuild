@@ -323,6 +323,15 @@ export class SketchScene {
     this.requestRender();
   }
 
+  /** Which way the camera looks now, as a view for a drawing sheet: `dir` toward the viewer, `xAxis` to the right. */
+  currentViewAxes(): { dir: Vec3; xAxis: Vec3 } {
+    this.camera.updateMatrixWorld();
+    const look = new THREE.Vector3();
+    this.camera.getWorldDirection(look);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    return { dir: [-look.x, -look.y, -look.z], xAxis: [right.x, right.y, right.z] };
+  }
+
   /** Where the middle of the view meets a plane, and how wide the view is there (mm). */
   viewOn(plane: SketchPlane): { center: Vec2; width: number } {
     const r = this.renderer.domElement.getBoundingClientRect();

@@ -9,7 +9,7 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import { Link, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  ArrowLeft, ArrowUpFromLine, Box, Circle, Combine, Eye, EyeOff, FlipHorizontal2, ListOrdered, LoaderCircle, Magnet, Maximize,
+  ArrowLeft, ArrowUpFromLine, Box, Circle, Combine, Eye, EyeOff, FileDown, FlipHorizontal2, ListOrdered, LoaderCircle, Magnet, Maximize,
   ImagePlus, MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, Trash2, TriangleRight, Undo2,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
@@ -17,7 +17,8 @@ import { useToast } from '../../components/Toast';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useCollaboration } from '../../context/CollaborationContext';
 import { useCollabEditing } from '../../hooks/useCollabEditing';
-import { fetchFileBlob, getFileMeta, getProjectSummary, saveFileVersion, type ProjectFile } from '../../utils/store';
+import { fetchFileBlob, getFileMeta, getProjectSummary, getSettings, saveBinaryFile, saveFileVersion, type ProjectFile } from '../../utils/store';
+import { downloadBlob } from '../../utils/download';
 import {
   PLANE_LABELS, SKETCH_MIME, axisClearOfShape, canPull, faceFrame, formatLength, frameOf, isShapeFeature, parseLength,
   parseSketch, planSolids, pullAtPoint, removeFeature, removeShape, samePlane, samePlaneSurface, serializeSketch,
@@ -33,7 +34,11 @@ import {
   type Draft, type Step, type ToolId,
 } from './sketchTools';
 import { SketchScene, viewForPlane, type Pick, type ViewName } from './sketchScene';
-import { buildSolids } from './geometryClient';
+import { buildSolids, projectViews } from './geometryClient';
+import type { ViewSpec } from './geometryTypes';
+import { SketchExportModal, type PdfOptions } from './SketchExportModal';
+import { buildSketchPdf } from './sketchPdf';
+import { SHEET_VIEWS, looseShapeLines, scalesFor, viewLabels, viewSpec, type SheetView } from './sketchViews';
 import type { SolidMesh } from './geometryTypes';
 import { sketchTitle } from './sketchNames';
 import { SketchSteps } from './SketchSteps';
@@ -228,6 +233,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const [copiesText, setCopiesText] = useState('0');
   const [mirrorKeep, setMirrorKeep] = useState(true);
   const [photoPicker, setPhotoPicker] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   // The step list starts open on wide screens.
   const [showSteps, setShowSteps] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
   const [lockAngles, setLockAngles] = useState(false);
@@ -771,6 +777,60 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     setSelection(null);
   };
 
+  // ── Export ────────────────────────────────────────────────────────────────
+  const exportName = () => sketchTitle(meta?.name);
+
+  /** The drawing sheet for the export dialog's choices (what is on screen now, saved or not). */
+  const makePdf = async (o: PdfOptions): Promise<Blob> => {
+    if (!doc) throw new Error('The sketch is still opening.');
+    const specs: ViewSpec[] = (['front', 'top', 'side', 'iso'] as SheetView[]).filter(v => o.views[v]).map(v => {
+      if (v === 'iso' && o.isoFrom === 'current' && sceneRef.current) {
+        const a = sceneRef.current.currentViewAxes();
+        return viewSpec('iso', a.dir, a.xAxis, false);
+      }
+      // The 3D view shows only the edges you would see; flat views can show hidden ones dashed.
+      return viewSpec(v, SHEET_VIEWS[v].dir, SHEET_VIEWS[v].xAxis, v !== 'iso' && o.hidden);
+    });
+    const projected = await projectViews(doc, specs);
+    if (projected.fatal) throw new Error(`The 3D engine could not draw the views: ${projected.fatal}`);
+    const settings = await getSettings().catch(() => ({} as Record<string, string>));
+    let logo: string | undefined = settings.logoUrl || undefined;
+    if (logo && !logo.startsWith('data:')) {
+      try {
+        const blob = await (await fetch(logo)).blob();
+        logo = await new Promise<string>(r => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob); });
+      } catch { logo = undefined; }
+    }
+    const pdf = buildSketchPdf({
+      title: exportName(),
+      projectName,
+      company: { name: settings.companyName || settings.appName, logoDataUrl: logo },
+      notes: o.notes,
+      units: doc.units,
+      paper: o.paper,
+      scale: o.scale === 'auto' ? undefined : scalesFor(doc.units).find(sc => sc.label === o.scale),
+      showDims: o.dims,
+      isoSize: o.isoSize,
+      date: new Date(),
+      views: specs.map((sp, i) => ({
+        name: sp.name as SheetView,
+        label: SHEET_VIEWS[sp.name as SheetView].label,
+        projected: projected.views[i] ?? { name: sp.name, visible: [], hidden: [] },
+        loose: looseShapeLines(doc, sp),
+        labels: sp.name === 'iso' ? [] : viewLabels(doc, plan, sp),
+      })),
+    });
+    return pdf.output('blob');
+  };
+
+  const saveExport = async (blob: Blob, name: string) => {
+    await saveBinaryFile(uuidv4(), blob, {
+      kind: 'sketch-export', name, projectId: meta?.projectId ?? undefined,
+      sourceType: 'sketch', sourceId: fileId,
+    });
+    toast(`Saved to Documents as "${name}".`, { type: 'success' });
+  };
+
   /** Lays a picked picture on the plane being drawn on, in the middle of the view, filling most of it. */
   const addReference = async (row: { id: string; name: string }) => {
     const scene = sceneRef.current;
@@ -883,7 +943,11 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     const snapped = snappedAt(clientX, clientY);
     if (!snapped) return;
     const id = () => uuidv4();
-    if (tool === 'line') applyStep(lineClick(draft, snapped.p, plane, arcMode, id));
+    if (tool === 'line') {
+      applyStep(lineClick(draft, snapped.p, plane, arcMode, id));
+      // An arc is usually a one-off between straight lines: after one, back to lines.
+      if (arcMode && draft?.tool === 'line' && draft.arcThrough) setArcMode(false);
+    }
     else if (tool === 'rect') applyStep(rectClick(draft, snapped.p, plane, id));
     else if (tool === 'circle') applyStep(circleClick(draft, snapped.p, plane, id));
   };
@@ -1181,6 +1245,11 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             <option value="metric">Millimetres</option>
           </select>
         )}
+        {doc && (
+          <Button variant="secondary" onClick={() => setExportOpen(true)} data-testid="sketch-export" size="sm" title="A drawing sheet (PDF) of the views">
+            <FileDown size={15} /><span className="hidden sm:inline">Export</span>
+          </Button>
+        )}
         {editable && (
           <Button onClick={() => void save()} disabled={!dirty || saving} data-testid="sketch-save" size="sm">
             <Save size={15} />{saving ? 'Saving…' : 'Save'}
@@ -1211,7 +1280,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
               type="button"
               data-testid="sketch-arc"
               onClick={() => { if (tool !== 'line') setTool('line'); setArcMode(m => !m); }}
-              title="Arcs: the next click sets the curve, the one after its end (A)"
+              title="Arc: the next click sets the curve, the one after its end; then it is back to lines (A)"
               aria-label="Arc"
               aria-pressed={arcMode && tool === 'line'}
               className={`flex size-10 items-center justify-center rounded-lg transition-colors ${arcMode && tool === 'line' ? 'bg-fuchsia-600 text-white' : 'text-ink-soft hover:bg-hover hover:text-ink'}`}
@@ -1353,6 +1422,17 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                 onMove={id => startPhotoDraft('photo-move', id)}
               />
             </div>
+          )}
+
+          {doc && (
+            <SketchExportModal
+              open={exportOpen}
+              onClose={() => setExportOpen(false)}
+              units={doc.units}
+              makePdf={makePdf}
+              onDownload={blob => downloadBlob(blob, `${exportName()} - drawing.pdf`)}
+              onSave={blob => saveExport(new Blob([blob], { type: 'application/pdf' }), `${exportName()} - drawing.pdf`)}
+            />
           )}
 
           <FilePickerModal
