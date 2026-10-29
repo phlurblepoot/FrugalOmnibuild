@@ -9,8 +9,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {
-  arcPoints, circleThrough, formatLength, frameOf, pulledShapeIds, shapeOutline, toWorld,
-  type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type Vec2, type Vec3,
+  arcPoints, circleThrough, formatLength, frameOf, recipePieces, shapeOutline, toWorld, usedShapeIds,
+  type RecipePiece, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Vec2, type Vec3,
 } from './sketchModel';
 import { gridStep, majorEvery, type SnapKind } from './sketchSnap';
 import type { SolidMesh } from './geometryTypes';
@@ -37,6 +37,8 @@ const TAN_HALF_FOV = Math.tan((FOV_DEG * Math.PI) / 360);
 
 export interface SceneContent {
   doc: SketchDoc;
+  /** How the steps make solids (for labelling each piece). */
+  plan: SolidPlan;
   solids: SolidMesh[];
   selectedShapeId: string | null;
   selectedFeatureId: string | null;
@@ -55,13 +57,16 @@ export interface ScenePreview {
   /** The angle of the line being drawn, measured from level: a dashed level
    *  line from the corner toward `levelDeg` (0 or 180), and an arc to the line. */
   angle?: { plane: SketchPlane; at: Vec2; levelDeg: number; dirDeg: number; text: string } | null;
+  /** A spin being set up: the shape, its axis (one point, or both), and how far round. */
+  spin?: { shape: SketchShape; axis: [Vec2, Vec2 | null]; angle: number } | null;
 }
 
 /** A solid under the pointer: which one, where, and the face it was hit on. */
 export interface SolidHit {
-  /** The solid's first pull, and every pull that built it. */
-  featureId: string;
+  /** The step that made the solid, every step in it, and the pulls still where they were drawn. */
+  solidId: string;
   featureIds: string[];
+  pullIds: string[];
   point: Vec3;
   /** Out of the solid. */
   normal: Vec3;
@@ -353,7 +358,7 @@ export class SketchScene {
   pick(clientX: number, clientY: number, only?: 'solids'): Pick {
     this.rayAt(clientX, clientY);
     const px = this.pxPerMm();
-    this.raycaster.params.Line = { threshold: 6 / px };
+    this.raycaster.params.Line = { threshold: 10 / px };
     const hits = this.raycaster.intersectObjects(only === 'solids' ? this.pickables.filter(o => o.userData.solid) : this.pickables, false);
     if (!hits.length) return null;
     // Lines and fills before solids at the same depth: a sketch drawn on a face stays pickable.
@@ -377,7 +382,7 @@ export class SketchScene {
     for (let i = start; i < start + count && planar; i++) planar = nrm(solid.indices[i]).dot(n0) > 0.99999;
     const n = planar ? n0.normalize() : (hit.face?.normal ?? n0).clone().normalize();
     return {
-      featureId: solid.featureId, featureIds: solid.featureIds,
+      solidId: solid.solidId, featureIds: solid.featureIds, pullIds: solid.pullIds,
       point: [hit.point.x, hit.point.y, hit.point.z], normal: [n.x, n.y, n.z], planar,
     };
   }
@@ -409,11 +414,15 @@ export class SketchScene {
     this.clear(this.content);
     this.pickables = [];
     this.units = c.doc.units;
-    const pulled = pulledShapeIds(c.doc);
+    const used = usedShapeIds(c.doc);
     const t = this.theme;
+    const pieces = new Map<string, { piece: RecipePiece; first: boolean }>();
+    for (const planned of c.plan.solids) {
+      recipePieces(planned.recipe).forEach((piece, i) => pieces.set(piece.fid, { piece, first: i === 0 }));
+    }
 
     for (const s of c.doc.shapes) {
-      if (pulled.has(s.id)) continue;
+      if (used.has(s.id)) continue;
       const selected = s.id === c.selectedShapeId;
       const line = this.outlineLine(s, selected ? t.selected : t.line);
       line.userData.shapeId = s.id;
@@ -441,7 +450,6 @@ export class SketchScene {
         color: t.solid, emissive: selected ? t.selected : 0x000000, emissiveIntensity: selected ? 0.18 : 0,
         roughness: 0.85, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
       }));
-      mesh.userData.featureId = solid.featureId;
       mesh.userData.featureIds = solid.featureIds;
       mesh.userData.solid = solid;
       mesh.renderOrder = -2;
@@ -455,26 +463,40 @@ export class SketchScene {
       this.content.add(edges);
       if (c.showDims) {
         for (const id of solid.featureIds) {
-          const f = c.doc.features.find(ff => ff.id === id);
-          const shape = f && c.doc.shapes.find(s => s.id === f.shapeId);
-          if (!f || !shape) continue;
-          this.addDims(shape);
-          this.addPullDim(shape, f.distance, this.content, id !== solid.featureId && f.distance < 0);
+          const entry = pieces.get(id);
+          if (entry) this.addPieceDims(entry.piece, !entry.first);
         }
       }
     }
-    // The selected pull's outline, drawn over the solid so it is clear which part is picked.
-    const picked = c.selectedFeatureId && c.doc.features.find(f => f.id === c.selectedFeatureId);
-    const pickedShape = picked && c.doc.shapes.find(s => s.id === picked.shapeId);
-    if (picked && pickedShape) {
-      for (const end of [0, picked.distance]) {
-        const line = this.outlineLine(pickedShape, t.selected, end);
+    // The selected step's outline (and path), drawn over the solid so it is clear which part is picked.
+    const picked = c.selectedFeatureId ? pieces.get(c.selectedFeatureId)?.piece : undefined;
+    if (picked) {
+      const lines = picked.op === 'pull'
+        ? [this.outlineLine(picked.shape, t.selected), this.outlineLine(picked.shape, t.selected, picked.distance)]
+        : picked.op === 'run'
+          ? [this.outlineLine(picked.shape, t.selected), this.outlineLine(picked.path, t.selected)]
+          : [this.outlineLine(picked.shape, t.selected)];
+      for (const line of lines) {
         (line.material as THREE.LineBasicMaterial).depthTest = false;
         line.renderOrder = 2;
         this.content.add(line);
       }
     }
     this.requestRender();
+  }
+
+  /** The measurements of one piece of a solid: its profile, and how far it was pulled, spun or run. */
+  private addPieceDims(piece: RecipePiece, laterPiece: boolean): void {
+    this.addDims(piece.shape);
+    if (piece.op === 'pull') {
+      this.addPullDim(piece.shape, piece.distance, this.content, laterPiece && piece.distance < 0);
+    } else if (piece.op === 'spin') {
+      const obj = new CSS2DObject(labelEl(`⟳ ${Math.round(piece.angle * 10) / 10}°`, 'pull'));
+      obj.position.copy(v3(piece.origin).addScaledVector(v3(piece.direction), 0.5));
+      this.content.add(obj);
+    } else {
+      this.addDims(piece.path);
+    }
   }
 
   setPreview(p: ScenePreview): void {
@@ -518,6 +540,7 @@ export class SketchScene {
       for (const g of p.snap.guides ?? []) this.preview.add(this.dashed([g, p.snap.p], p.snap.plane, GUIDE_COLOR));
     }
     if (p.angle) this.addAngle(p.angle);
+    if (p.spin) this.addSpinPreview(p.spin);
     if (p.readout) {
       const obj = new CSS2DObject(labelEl(p.readout.text, 'readout'));
       obj.position.copy(v3(p.readout.at));
@@ -551,6 +574,31 @@ export class SketchScene {
     line.computeLineDistances();
     line.renderOrder = 4;
     return line;
+  }
+
+  /** A spin being set up: the axis (dashed, running on past both points) and
+   *  the shape's outline turned round it in steps, as a see-through ghost. */
+  private addSpinPreview(sp: NonNullable<ScenePreview['spin']>): void {
+    const { shape, axis: [a, b] } = sp;
+    if (!b || Math.hypot(b.x - a.x, b.y - a.y) < 1e-6) return;
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    const reach = Math.max(len, ...shapeOutline(shape, 8).map(p => Math.hypot(p.x - a.x, p.y - a.y))) * 1.3;
+    const ext = (k: number): Vec2 => ({ x: a.x + (dx / len) * k, y: a.y + (dy / len) * k });
+    this.preview.add(this.dashed([ext(-reach * 0.3), ext(reach)], shape.plane, this.theme.preview));
+    const origin = v3(toWorld(shape.plane, a));
+    const dir = v3(toWorld(shape.plane, b)).sub(origin).normalize();
+    const angle = Math.max(-360, Math.min(360, sp.angle));
+    const steps = Math.max(2, Math.round(Math.abs(angle) / 15));
+    const outline = shapeOutline(shape, 24).map(p => v3(toWorld(shape.plane, p)).sub(origin));
+    const rot = new THREE.Matrix4();
+    for (let i = 1; i <= steps; i++) {
+      rot.makeRotationAxis(dir, (angle * Math.PI / 180) * (i / steps));
+      const pts = outline.map(p => p.clone().applyMatrix4(rot).add(origin));
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: this.theme.preview, transparent: true, opacity: i === steps ? 0.9 : 0.35, depthTest: false }));
+      line.renderOrder = 3;
+      this.preview.add(line);
+    }
   }
 
   /** The angle of the line being drawn: a dashed level line and an arc from it, labelled. */

@@ -1,14 +1,15 @@
 // src/pages/sketch/geometry.worker.ts
 // Builds a sketch's solids with OpenCascade (through replicad) off the main
 // thread and hands back triangle meshes and edge lines for three.js to draw.
-// Pulls of shapes drawn on a solid's faces are joined to it or cut from it.
+// Each solid is built from its recipe (see planSolids): pulls, spins and
+// runs, with shapes drawn on its faces joined to it or cut from it.
 // The ~23 MB engine loads on the first build only.
 /// <reference lib="webworker" />
 import opencascade from 'replicad-opencascadejs';
 // @ts-ignore — Vite turns ?url imports into the emitted asset's URL
 import wasmUrl from 'replicad-opencascadejs/wasm?url';
-import { setOC, draw, drawCircle, Plane, type Drawing } from 'replicad';
-import { frameOf, solidOfPull, type PullFeature, type SketchDoc, type SketchShape } from './sketchModel';
+import { setOC, draw, drawCircle, genericSweep, Plane, type Drawing } from 'replicad';
+import { frameOf, planSolids, type Recipe, type SketchDoc, type SketchShape, type Vec3 } from './sketchModel';
 import type { BuildRequest, BuildResponse, SolidMesh } from './geometryTypes';
 
 let engine: Promise<void> | null = null;
@@ -31,54 +32,90 @@ const drawingFor = (s: SketchShape): Drawing => {
 interface SolidLike {
   fuse(other: SolidLike): SolidLike;
   cut(tool: SolidLike): SolidLike;
+  clone(): SolidLike;
   mesh(o: { tolerance: number; angularTolerance: number }): {
     vertices: number[]; normals: number[]; triangles: number[]; faceGroups: { start: number; count: number }[];
   };
   meshEdges(o: { tolerance: number; angularTolerance: number }): { lines: number[] };
   delete(): void;
 }
+interface SketchLike {
+  wire: unknown;
+  extrude(d: number): SolidLike;
+  revolve(axis: Vec3, o: { origin: Vec3; angle: number }): SolidLike;
+  delete(): void;
+}
 
-const pullShape = (shape: SketchShape, distance: number): SolidLike => {
+const sketchOf = (shape: SketchShape): SketchLike => {
   const f = frameOf(shape.plane);
-  const plane = new Plane(f.origin, f.xDir, f.normal);
-  const sketch = drawingFor(shape).sketchOnPlane(plane) as unknown as { extrude: (d: number) => SolidLike };
-  return sketch.extrude(distance);
+  return drawingFor(shape).sketchOnPlane(new Plane(f.origin, f.xDir, f.normal)) as unknown as SketchLike;
 };
 
-type Built = { mesh: Omit<SolidMesh, 'featureId' | 'featureIds'> | null; errors: BuildResponse['errors'] };
+/** An open path's drawing (a closed one, or a circle, closes as usual). */
+const pathDrawingFor = (s: SketchShape): Drawing => {
+  if (s.type === 'circle' || s.closed) return drawingFor(s);
+  let pen = draw([s.start.x, s.start.y]);
+  for (const seg of s.segments) {
+    pen = seg.kind === 'line'
+      ? pen.lineTo([seg.to.x, seg.to.y])
+      : pen.threePointsArcTo([seg.to.x, seg.to.y], [seg.through.x, seg.through.y]);
+  }
+  return pen.done();
+};
 
-// A solid's mesh depends only on its pulls and their shapes, so unchanged
-// ones are reused between builds instead of being rebuilt on every edit.
+type Errors = BuildResponse['errors'];
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** Builds a recipe into a new OpenCascade solid (the caller deletes it), or null when it cannot be built. */
+const make = (r: Recipe, errors: Errors): SolidLike | null => {
+  try {
+    switch (r.op) {
+      case 'pull':
+        return sketchOf(r.shape).extrude(r.distance);
+      case 'spin':
+        return sketchOf(r.shape).revolve(r.direction, { origin: r.origin, angle: r.angle });
+      case 'run': {
+        const f = frameOf(r.path.plane);
+        const spine = (pathDrawingFor(r.path).sketchOnPlane(new Plane(f.origin, f.xDir, f.normal)) as unknown as SketchLike).wire;
+        // Right corners: each straight run meets the next in a mitre.
+        return genericSweep(sketchOf(r.shape).wire as never, spine as never, { transitionMode: 'right' }) as unknown as SolidLike;
+      }
+      case 'join':
+      case 'cut': {
+        const a = make(r.a, errors);
+        if (!a) return null;
+        const b = make(r.b, errors);
+        if (!b) return a;
+        try {
+          const out = r.op === 'cut' ? a.cut(b) : a.fuse(b);
+          a.delete();
+          return out;
+        } catch (e) {
+          errors.push({ featureId: r.fid, message: message(e) });
+          return a;
+        } finally {
+          b.delete();
+        }
+      }
+    }
+  } catch (e) {
+    errors.push({ featureId: r.fid, message: message(e) });
+    return null;
+  }
+};
+
+type Built = { mesh: Omit<SolidMesh, 'solidId' | 'featureIds' | 'pullIds'> | null; errors: Errors };
+
+// A solid's mesh depends only on its recipe, so unchanged solids are reused
+// between builds instead of being rebuilt on every edit.
 const cache = new Map<string, Built>();
 
-/** One solid from its pulls in order: the first makes it, each later one
- *  (drawn on one of its faces) joins it when pulled out or cuts it when pulled in. */
-const buildSolid = (pulls: { feature: PullFeature; shape: SketchShape }[]): Built => {
-  const key = JSON.stringify(pulls);
+const buildSolid = (recipe: Recipe): Built => {
+  const key = JSON.stringify(recipe);
   const hit = cache.get(key);
   if (hit) return hit;
-  const errors: BuildResponse['errors'] = [];
-  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-  let body: SolidLike | null = null;
-  for (const { feature, shape } of pulls) {
-    let piece: SolidLike;
-    try {
-      piece = pullShape(shape, feature.distance);
-    } catch (e) {
-      errors.push({ featureId: feature.id, message: message(e) });
-      continue;
-    }
-    if (!body) { body = piece; continue; }
-    try {
-      const next: SolidLike = feature.distance < 0 ? body.cut(piece) : body.fuse(piece);
-      body.delete();
-      body = next;
-    } catch (e) {
-      errors.push({ featureId: feature.id, message: message(e) });
-    } finally {
-      piece.delete();
-    }
-  }
+  const errors: Errors = [];
+  const body = make(recipe, errors);
   let mesh: Built['mesh'] = null;
   if (body) {
     try {
@@ -91,6 +128,8 @@ const buildSolid = (pulls: { feature: PullFeature; shape: SketchShape }[]): Buil
         faceRuns: new Uint32Array(m.faceGroups.flatMap(g => [g.start, g.count])),
         edges: new Float32Array(edges.lines),
       };
+    } catch (e) {
+      errors.push({ featureId: recipe.fid, message: message(e) });
     } finally {
       body.delete();
     }
@@ -102,26 +141,13 @@ const buildSolid = (pulls: { feature: PullFeature; shape: SketchShape }[]): Buil
 };
 
 const build = (doc: SketchDoc): Omit<BuildResponse, 'requestId'> => {
-  const solidOf = solidOfPull(doc);
-  const groups = new Map<string, { feature: PullFeature; shape: SketchShape }[]>();
-  for (const feature of doc.features) {
-    const shape = doc.shapes.find(s => s.id === feature.shapeId);
-    if (!shape) continue;
-    const root = solidOf.get(feature.id) ?? feature.id;
-    const list = groups.get(root) ?? [];
-    list.push({ feature, shape });
-    groups.set(root, list);
-  }
+  const plan = planSolids(doc);
   const solids: SolidMesh[] = [];
-  const errors: BuildResponse['errors'] = [];
-  for (const [root, pulls] of groups) {
-    try {
-      const built = buildSolid(pulls);
-      errors.push(...built.errors);
-      if (built.mesh) solids.push({ featureId: root, featureIds: pulls.map(p => p.feature.id), ...built.mesh });
-    } catch (e) {
-      errors.push({ featureId: root, message: e instanceof Error ? e.message : String(e) });
-    }
+  const errors: Errors = [];
+  for (const planned of plan.solids) {
+    const built = buildSolid(planned.recipe);
+    errors.push(...built.errors);
+    if (built.mesh) solids.push({ solidId: planned.id, featureIds: planned.featureIds, pullIds: planned.pullIds, ...built.mesh });
   }
   return { solids, errors };
 };

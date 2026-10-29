@@ -9,8 +9,8 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import { Link, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  ArrowLeft, ArrowUpFromLine, Box, Circle, Eye, EyeOff, LoaderCircle, Magnet, Maximize, MousePointer2, PenLine,
-  RectangleHorizontal, Redo2, Save, Spline, Trash2, TriangleRight, Undo2,
+  ArrowLeft, ArrowUpFromLine, Box, Circle, Eye, EyeOff, ListOrdered, LoaderCircle, Magnet, Maximize, MousePointer2, PenLine,
+  RectangleHorizontal, Redo2, Rotate3d, Route, Save, Spline, Trash2, TriangleRight, Undo2,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
@@ -19,9 +19,10 @@ import { useCollaboration } from '../../context/CollaborationContext';
 import { useCollabEditing } from '../../hooks/useCollabEditing';
 import { fetchFileBlob, getFileMeta, getProjectSummary, saveFileVersion, type ProjectFile } from '../../utils/store';
 import {
-  PLANE_LABELS, SKETCH_MIME, canPull, faceFrame, formatLength, parseLength, parseSketch, pullAtPoint, pulledShapeIds,
-  removeShape, samePlane, samePlaneSurface, serializeSketch, setPullDistance, shapeOutline, shapeSnapPoints, toPlane,
-  toWorld, type PlaneId, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type Vec2,
+  PLANE_LABELS, SKETCH_MIME, axisClearOfShape, canPull, faceFrame, formatLength, parseLength, parseSketch, planSolids,
+  pullAtPoint, removeShape, samePlane, samePlaneSurface, serializeSketch, setPullDistance, shapeOutline, shapeSnapPoints,
+  toPlane, toWorld, usedShapeIds, type PlaneId, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits,
+  type SolidPlan, type Vec2,
 } from './sketchModel';
 import {
   angleDeg, angleFromLevel, gridStep, levelAngleToward, parseAngle, pointAt, snapPoint, type SnapTargets,
@@ -34,6 +35,7 @@ import { SketchScene, viewForPlane, type Pick, type ViewName } from './sketchSce
 import { buildSolids } from './geometryClient';
 import type { SolidMesh } from './geometryTypes';
 import { sketchTitle } from './sketchNames';
+import { SketchSteps } from './SketchSteps';
 
 // The mobile top bar sits above every page on phones (AppShell); the editor
 // fills whatever is left — the same rule as the document editor.
@@ -48,7 +50,10 @@ const TOOL_HINTS: Record<ToolId, string> = {
   rect: 'Click two corners, or click one and type the width and height. Hold Shift to line up with what is drawn.',
   circle: 'Click the centre, then a point on the edge, or type the radius. Hold Shift to line up with what is drawn.',
   pull: 'Click a closed shape (or a solid to change it), move to pull it out, then click or type the distance. A shape drawn on a face joins the solid when pulled out and cuts it when pulled in.',
+  spin: 'Click a closed shape to spin, then two points on the line to spin it round (in its plane, to one side of it). Type an angle for less than a full turn.',
+  run: 'Click the profile (a closed shape), then the path to run it along. Draw the profile across the path, where the path starts; corners are mitred.',
 };
+const EMPTY_PLAN: SolidPlan = { solids: [], skipped: new Map() };
 const FACE_PICK_HINT = 'Click a flat face of a solid to draw on it.';
 const ANGLE_STEP_DEG = 15;
 const PERSPECTIVE_KEY = 'sketch-perspective';
@@ -114,7 +119,7 @@ type Selection = { shapeId: string } | { featureId: string } | null;
 const selectionOf = (doc: SketchDoc, picked: Pick): Selection => {
   if (!picked) return null;
   if ('shapeId' in picked) return picked;
-  return { featureId: pullAtPoint(doc, picked.solid.featureIds, picked.solid.point) ?? picked.solid.featureId };
+  return { featureId: pullAtPoint(doc, picked.solid.pullIds, picked.solid.point) ?? picked.solid.solidId };
 };
 
 export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
@@ -202,6 +207,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const [perspective, setPerspectiveState] = useState(readPerspective);
   // Tablet stand-ins for holding Shift (line up with what is drawn) and Ctrl (lock angles).
   const [snapShapes, setSnapShapes] = useState(false);
+  // The step list starts open on wide screens.
+  const [showSteps, setShowSteps] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
   const [lockAngles, setLockAngles] = useState(false);
   const mods = useRef({ shift: false, ctrl: false, alt: false });
   const [draft, setDraftState] = useState<Draft | null>(null);
@@ -213,6 +220,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
 
   // ── Solids ────────────────────────────────────────────────────────────────
   const [solids, setSolids] = useState<SolidMesh[]>([]);
+  const plan = useMemo(() => (doc ? planSolids(doc) : EMPTY_PLAN), [doc]);
   const [engine, setEngine] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [buildErrors, setBuildErrors] = useState<string[]>([]);
   const buildSeq = useRef(0);
@@ -248,7 +256,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (!scene || !doc) return;
     scene.setUnits(doc.units);
     scene.setContent({
-      doc, solids, showDims,
+      doc, plan, solids, showDims,
       selectedShapeId: selection && 'shapeId' in selection ? selection.shapeId : null,
       selectedFeatureId: selection && 'featureId' in selection ? selection.featureId : null,
     });
@@ -257,12 +265,12 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       fitted.current = true;
       scene.fit(doc, solids);
     }
-  }, [doc, solids, selection, showDims]);
+  }, [doc, plan, solids, selection, showDims]);
   useEffect(() => { sceneRef.current?.setWorkPlane(plane); }, [plane]);
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull'));
+    const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull') || draft?.tool === 'spin');
     scene.setNavigation(drawing ? 'draw' : 'navigate');
   }, [tool, draft, view, editable, facePick]);
 
@@ -272,12 +280,16 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   };
 
   const setTool = (t: ToolId) => {
+    const preselected = selection && 'shapeId' in selection ? selection : null;
     setDraft(null);
     setTyped(['', '']);
     setFacePick(false);
     setToolState(t);
     if (isDrawTool(t)) setView(viewForPlane(plane));
     if (t !== 'select') setSelection(null);
+    // A shape picked before choosing Spin or Run is the one to spin or run.
+    if (preselected && t === 'spin') startSpin(preselected);
+    if (preselected && t === 'run') startRun(preselected);
   };
 
   const setPlane = (p: PlaneId) => {
@@ -295,7 +307,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (!picked || !('solid' in picked)) { toast('Click a face of a solid.', { type: 'warning' }); return; }
     if (!picked.solid.planar) { toast('That face is curved. Pick a flat face to draw on.', { type: 'warning' }); return; }
     const frame = faceFrame(picked.solid.point, picked.solid.normal);
-    const onFeatureId = pullAtPoint(doc, picked.solid.featureIds, picked.solid.point) ?? picked.solid.featureId;
+    const onFeatureId = pullAtPoint(doc, picked.solid.pullIds, picked.solid.point) ?? picked.solid.solidId;
     setFacePick(false);
     setDraft(null);
     setWork({ plane: frame, onFeatureId });
@@ -360,8 +372,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     const raw = scene.planePoint(clientX, clientY, plane);
     if (!raw) return null;
     const pxPerMm = scene.pxPerMm();
-    const from = draft?.tool === 'line' ? draftLastPoint(draft) : draft?.tool === 'rect' ? draft.a : draft?.tool === 'circle' ? draft.center : undefined;
-    const lock = draft?.tool === 'line' && !draft.arcThrough && (mods.current.ctrl || lockAngles);
+    const from = draft?.tool === 'line' ? draftLastPoint(draft) : draft?.tool === 'rect' ? draft.a : draft?.tool === 'circle' ? draft.center
+      : draft?.tool === 'spin' ? draft.a : undefined;
+    const lock = ((draft?.tool === 'line' && !draft.arcThrough) || (draft?.tool === 'spin' && !!draft.a)) && (mods.current.ctrl || lockAngles);
     return snapPoint({
       raw, pxPerMm, step: gridStep(doc.units, pxPerMm), targets: snapTargets, from,
       free: mods.current.alt, shapes: mods.current.shift || snapShapes, angleStep: lock ? ANGLE_STEP_DEG : null,
@@ -371,7 +384,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   /** Where the typed sizes put the next point (line), the other corner (rectangle) or the edge
    *  (circle), using the pointer for what is not typed; null when nothing usable is typed. */
   const typedPoint = (d: Draft | null): Vec2 | null => {
-    if (!doc || !d || d.tool === 'pull') return null;
+    if (!doc || !d || d.tool === 'pull' || d.tool === 'spin' || d.tool === 'run') return null;
     const units = doc.units;
     const ptr = hover.current;
     const [a, b] = typed;
@@ -453,6 +466,19 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       }
       return;
     }
+    if (tool === 'spin' && draft?.tool === 'spin') {
+      const shape = doc.shapes.find(s => s.id === draft.shapeId);
+      const snapped = ptr ? snappedAt(ptr.x, ptr.y) : null;
+      if (snapped) hover.current = snapped.p;
+      if (!shape || !snapped) { scene.setPreview(none); return; }
+      const typedAngle = parseFloat(typed[0]);
+      scene.setPreview({
+        ...none,
+        snap: { p: snapped.p, plane, kind: snapped.kind, guides: snapped.guides },
+        spin: draft.a ? { shape, axis: [draft.a, snapped.p], angle: Number.isFinite(typedAngle) && typedAngle !== 0 ? typedAngle : 360 } : null,
+      });
+      return;
+    }
     if (!isDrawTool(tool)) { scene.setPreview(none); return; }
     // The pointer's snapped point; while the pointer is off the view (in the
     // size box), the last one it had, so typed sizes still preview.
@@ -523,10 +549,11 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
 
   const startPull = (picked: Selection) => {
     if (!doc || !picked) return;
-    const pulled = pulledShapeIds(doc);
+    const pulled = usedShapeIds(doc);
     if ('featureId' in picked) {
       const f = doc.features.find(ff => ff.id === picked.featureId);
       if (!f) return;
+      if (f.type !== 'pull') { toast(`Change a ${f.type === 'spin' ? 'spin' : 'run'} in the step list.`, { type: 'info' }); return; }
       pullDistance.current = f.distance;
       setDraft({ tool: 'pull', shapeId: f.shapeId, featureId: f.id, distance: f.distance });
       return;
@@ -540,6 +567,62 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (sceneRef.current?.facesPlane(shape.plane)) setView('iso');
   };
 
+  /** The closed, unused shape a Spin or Run starts from, or a message saying why not. */
+  const profileFrom = (picked: Selection): SketchShape | string => {
+    if (!doc || !picked) return 'Click a closed shape.';
+    if ('featureId' in picked) return 'Click a shape (an outline), not a solid.';
+    const shape = doc.shapes.find(s => s.id === picked.shapeId);
+    if (!shape || usedShapeIds(doc).has(shape.id)) return 'Click a closed shape.';
+    if (!canPull(shape)) return 'Only a closed shape can be used. Close it by ending on its first point.';
+    return shape;
+  };
+
+  const startSpin = (picked: Selection) => {
+    const shape = profileFrom(picked);
+    if (typeof shape === 'string') { toast(shape, { type: 'warning' }); return; }
+    setDraft({ tool: 'spin', shapeId: shape.id });
+    setSelection({ shapeId: shape.id });
+    // The axis is drawn in the shape's own plane, looking straight at it.
+    setWork({ plane: shape.plane, onFeatureId: shape.onFeatureId });
+    sceneRef.current?.setWorkPlane(shape.plane);
+    if (!sceneRef.current?.facesPlane(shape.plane)) setView(viewForPlane(shape.plane));
+  };
+
+  const commitSpin = (d: Extract<Draft, { tool: 'spin' }>, b: Vec2) => {
+    const shape = doc?.shapes.find(s => s.id === d.shapeId);
+    if (!doc || !shape || !d.a || Math.hypot(b.x - d.a.x, b.y - d.a.y) < 1e-6) return;
+    const typedAngle = typed[0].trim() ? parseFloat(typed[0].replace('°', '')) : 360;
+    if (!Number.isFinite(typedAngle) || typedAngle === 0 || Math.abs(typedAngle) > 360) { toast('Type an angle from 1 to 360.', { type: 'warning' }); return; }
+    if (!axisClearOfShape(shape, [d.a, b])) { toast('The axis runs through the shape. Put it to one side (it may run along an edge).', { type: 'warning' }); return; }
+    commitDoc({ ...doc, features: [...doc.features, { id: uuidv4(), type: 'spin', shapeId: shape.id, axis: [d.a, b], angle: typedAngle }] });
+    setDraft(null);
+    setTyped(['', '']);
+    setSelection(null);
+    setView('iso');
+  };
+
+  const startRun = (picked: Selection) => {
+    const shape = profileFrom(picked);
+    if (typeof shape === 'string') { toast(shape, { type: 'warning' }); return; }
+    setDraft({ tool: 'run', shapeId: shape.id });
+    setSelection({ shapeId: shape.id });
+  };
+
+  const commitRun = (d: Extract<Draft, { tool: 'run' }>, picked: Selection) => {
+    if (!doc) return;
+    const path = picked && 'shapeId' in picked ? doc.shapes.find(s => s.id === picked.shapeId) : undefined;
+    if (!path || usedShapeIds(doc).has(path.id)) { toast('Click the path to run along (a line, arc or outline).', { type: 'warning' }); return; }
+    if (path.id === d.shapeId) { toast('Click a different shape for the path.', { type: 'warning' }); return; }
+    const id = uuidv4();
+    const next: SketchDoc = { ...doc, features: [...doc.features, { id, type: 'run', shapeId: d.shapeId, pathId: path.id }] };
+    const why = planSolids(next).skipped.get(id);
+    if (why) { toast(why, { type: 'warning' }); return; }
+    commitDoc(next);
+    setDraft(null);
+    setSelection(null);
+    if (sceneRef.current?.currentView !== 'iso') setView('iso');
+  };
+
   const handleClick = (clientX: number, clientY: number) => {
     const scene = sceneRef.current;
     if (!scene || !doc) return;
@@ -551,6 +634,20 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (tool === 'pull') {
       if (draft?.tool === 'pull') commitPull(typedPull() ?? pullDistance.current);
       else startPull(selectionOf(doc, scene.pick(clientX, clientY)));
+      return;
+    }
+    if (tool === 'spin') {
+      if (draft?.tool !== 'spin') { startSpin(selectionOf(doc, scene.pick(clientX, clientY))); return; }
+      const snapped = snappedAt(clientX, clientY);
+      if (!snapped) return;
+      if (!draft.a) setDraft({ ...draft, a: snapped.p });
+      else commitSpin(draft, snapped.p);
+      return;
+    }
+    if (tool === 'run') {
+      const picked = selectionOf(doc, scene.pick(clientX, clientY));
+      if (draft?.tool !== 'run') startRun(picked);
+      else commitRun(draft, picked);
       return;
     }
     const snapped = snappedAt(clientX, clientY);
@@ -590,6 +687,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       const dist = typedPull();
       if (dist === null) return bad('distance');
       commitPull(dist);
+    } else if (d?.tool === 'spin') {
+      if (!d.a || !hover.current) return toast('Click two points on the axis to spin round.', { type: 'info' });
+      commitSpin(d, hover.current);
     }
   };
 
@@ -674,6 +774,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       case 'r': case 'R': setTool('rect'); break;
       case 'c': case 'C': setTool('circle'); break;
       case 'p': case 'P': setTool('pull'); break;
+      case 's': case 'S': setTool('spin'); break;
+      case 'f': case 'F': setTool('run'); break;
       default: return;
     }
     e.preventDefault();
@@ -772,7 +874,11 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     : draft?.tool === 'rect' ? [{ label: 'Width', placeholder: units === 'metric' ? '600' : `2'` }, { label: 'Height', placeholder: units === 'metric' ? '90' : '3 1/2' }]
     : draft?.tool === 'circle' ? [{ label: 'Radius', placeholder: units === 'metric' ? '50' : '2' }]
     : draft?.tool === 'pull' ? [{ label: 'Distance', placeholder: units === 'metric' ? '300' : `1'` }]
+    : draft?.tool === 'spin' ? [{ label: 'Angle °', placeholder: '360' }]
     : [];
+  const draftHint = draft?.tool === 'spin' ? (draft.a ? 'Click the second point of the axis.' : 'Click the first point of the line to spin round.')
+    : draft?.tool === 'run' ? 'Now click the path to run it along.'
+    : null;
 
   const toolButton = (t: ToolId, label: string, icon: React.ReactNode, key: string) => (
     <button
@@ -852,6 +958,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             {toolButton('rect', 'Rectangle', <RectangleHorizontal size={18} />, 'R')}
             {toolButton('circle', 'Circle', <Circle size={18} />, 'C')}
             {toolButton('pull', 'Pull into 3D', <ArrowUpFromLine size={18} />, 'P')}
+            {toolButton('spin', 'Spin round a line', <Rotate3d size={18} />, 'S')}
+            {toolButton('run', 'Run along a path', <Route size={18} />, 'F')}
             <div className="my-1 h-px w-8 bg-edge" />
             <button
               type="button"
@@ -940,7 +1048,27 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
               className="rounded-md p-1 text-ink-soft hover:bg-hover"><Maximize size={14} /></button>
             <button type="button" onClick={() => setShowDims(s => !s)} title={showDims ? 'Hide dimensions' : 'Show dimensions'} aria-label="Dimensions"
               aria-pressed={showDims} className="rounded-md p-1 text-ink-soft hover:bg-hover">{showDims ? <Eye size={14} /> : <EyeOff size={14} />}</button>
+            <button type="button" onClick={() => setShowSteps(v => !v)} aria-pressed={showSteps} data-testid="sketch-steps-toggle"
+              title={showSteps ? 'Hide the steps' : 'Show the steps'}
+              className={`flex items-center gap-1 rounded-md px-1.5 py-1 font-medium ${showSteps ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>
+              <ListOrdered size={14} />{doc?.features.length ? doc.features.length : ''}
+            </button>
           </div>
+
+          {showSteps && doc && (
+            <div className="pointer-events-none absolute bottom-20 right-3 top-14 flex flex-col items-end">
+              <SketchSteps
+                doc={doc}
+                plan={plan}
+                selectedId={selection && 'featureId' in selection ? selection.featureId : null}
+                editable={editable}
+                onSelect={id => { setDraft(null); setSelection(id ? { featureId: id } : null); }}
+                onChange={next => commitDoc(next)}
+                onClose={() => setShowSteps(false)}
+                onError={m => toast(m, { type: 'warning' })}
+              />
+            </div>
+          )}
 
           {(engine === 'loading' || !doc) && (
             <div className="pointer-events-none absolute left-1/2 top-16 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-edge bg-raised px-3 py-2 text-sm text-ink-soft shadow-sm">
@@ -954,7 +1082,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
           )}
 
           {editable && (
-            <div className="absolute inset-x-3 bottom-3 flex justify-center">
+            <div className="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center">
               <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-xl border border-edge bg-raised/95 px-3 py-2 text-sm shadow-lg" data-testid="sketch-vcb">
                 {typedFields.length > 0 ? (
                   <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); applyTyped(); }}>
@@ -980,8 +1108,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                     <Button type="submit" size="sm">Enter</Button>
                   </form>
                 ) : (
-                  <span className="text-xs text-ink-soft">{facePick ? FACE_PICK_HINT : TOOL_HINTS[tool]}</span>
+                  <span className="text-xs text-ink-soft">{facePick ? FACE_PICK_HINT : draftHint ?? TOOL_HINTS[tool]}</span>
                 )}
+                {typedFields.length > 0 && draftHint && <span className="text-xs text-ink-faint">{draftHint}</span>}
                 {draft?.tool === 'line' && (
                   <span className="text-xs text-ink-faint">{draft.arcThrough ? 'Click where the arc ends.' : arcMode ? 'Arc: click a point on the curve.' : ''}</span>
                 )}

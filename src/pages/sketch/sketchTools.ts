@@ -8,7 +8,7 @@ import {
 } from './sketchModel';
 import { pointAt } from './sketchSnap';
 
-export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull';
+export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull' | 'spin' | 'run';
 
 export type Draft =
   /** A chain of lines and arcs. `arcThrough` is set while an arc waits for its end. */
@@ -16,7 +16,11 @@ export type Draft =
   | { tool: 'rect'; plane: SketchPlane; a: Vec2 }
   | { tool: 'circle'; plane: SketchPlane; center: Vec2 }
   /** Pulling a shape (featureId set when re-pulling an existing solid). */
-  | { tool: 'pull'; shapeId: string; featureId?: string; distance: number };
+  | { tool: 'pull'; shapeId: string; featureId?: string; distance: number }
+  /** Spinning a shape: picked, then the axis's first point (`a`), then its second. */
+  | { tool: 'spin'; shapeId: string; a?: Vec2 }
+  /** Running a profile along a path: the profile is picked, the path comes next. */
+  | { tool: 'run'; shapeId: string };
 
 export interface Step { draft: Draft | null; commit?: SketchShape }
 
@@ -97,7 +101,7 @@ export const circleTyped = (draft: Draft | null, radius: number, newId: () => st
 
 /** The outline to show for a draft while the pointer is at `at` (open path, plane mm). */
 export const draftPreview = (draft: Draft | null, at: Vec2 | null): SketchShape | null => {
-  if (!draft || draft.tool === 'pull') return null;
+  if (!draft || draft.tool === 'pull' || draft.tool === 'spin' || draft.tool === 'run') return null;
   if (draft.tool === 'rect') return at ? rectanglePath('preview', draft.plane, draft.a, at) : null;
   if (draft.tool === 'circle') return at ? { id: 'preview', type: 'circle', plane: draft.plane, center: draft.center, radius: dist2(draft.center, at) } : null;
   const segments = [...draft.segments];

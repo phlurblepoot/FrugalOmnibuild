@@ -2,12 +2,14 @@
 // Messages between the sketch editor and its geometry worker.
 import type { SketchDoc } from './sketchModel';
 
-/** One solid: a pull, plus the pulls of shapes drawn on its faces joined to or cut from it. */
+/** One solid, as planned by planSolids. */
 export interface SolidMesh {
-  /** The solid's first pull. */
-  featureId: string;
-  /** Every pull that built it, in order (the first is `featureId`). */
+  /** The id of the step that made it. */
+  solidId: string;
+  /** Every step that went into it, in order. */
   featureIds: string[];
+  /** The pulls whose outline is still where it was drawn (for telling which one a click landed on). */
+  pullIds: string[];
   /** xyz per vertex, world mm (z up). */
   positions: Float32Array;
   normals: Float32Array;
@@ -23,7 +25,7 @@ export interface BuildRequest { requestId: number; doc: SketchDoc }
 export interface BuildResponse {
   requestId: number;
   solids: SolidMesh[];
-  /** Pulls that could not be built (the rest still show). */
+  /** Steps that could not be built (the rest still show). */
   errors: { featureId: string; message: string }[];
   /** The engine itself failed to load or run. */
   fatal?: string;

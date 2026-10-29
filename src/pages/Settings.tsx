@@ -29,6 +29,16 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.1',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 2, part 1): Spin turns a closed shape round a line in its plane, all the way round or by an angle you type, for columns, rosettes and curved mouldings. Pick the shape, then click two points on the line; the turned shape shows as you move.',
+      'Sketch: Run along a path sends a profile along a path, such as a cornice round a room, with mitred corners. Draw the profile across the path where it starts (on Front for a path that runs back, for example), then pick the profile and the path. The path can be open or closed and can have arcs.',
+      'Sketch: a Steps list (the list button by the views) shows each pull, cut, spin and run in order. Pick one to see it on the model, change its distance or angle, or delete it; its shape comes back as an outline.',
+      'Sketch: lines are easier to pick, and the strip along the bottom of the drawing no longer blocks the pointer beside the size boxes.',
+    ],
+  },
+  {
     version: '4.6.9',
     date: 'October 29, 2026',
     changes: [

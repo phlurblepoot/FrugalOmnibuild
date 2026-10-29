@@ -2,8 +2,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   emptySketch, parseSketch, serializeSketch, formatLength, parseLength, circleThrough, arcPoints,
-  rectanglePath, canPull, toWorld, shapeSnapPoints, faceFrame, samePlane, samePlaneSurface, toPlane, solidOfPull,
-  pullAtPoint, removeShape, setPullDistance, MM_PER_INCH, type SketchDoc, type Vec2,
+  rectanglePath, canPull, toWorld, shapeSnapPoints, faceFrame, samePlane, samePlaneSurface, toPlane, planSolids,
+  pullAtPoint, removeShape, removeFeature, setPullDistance, axisClearOfShape, describeShape, usedShapeIds, recipePieces,
+  MM_PER_INCH, type PullFeature, type SketchDoc, type Vec2,
 } from './sketchModel';
 import {
   gridStep, snapPoint, pointAt, angleDeg, parseAngle, levelAngleToward, angleFromLevel, type SnapTargets,
@@ -203,8 +204,14 @@ describe('drawing on faces', () => {
     return doc;
   };
 
-  it('groups the pulls drawn on a solid with it', () => {
-    expect([...solidOfPull(block()).entries()]).toEqual([['p1', 'p1'], ['p2', 'p1'], ['p3', 'p1'], ['p4', 'p4']]);
+  it('joins and cuts the pulls drawn on a solid into it', () => {
+    const plan = planSolids(block());
+    expect(plan.solids.map(s => [s.id, s.featureIds])).toEqual([['p1', ['p1', 'p2', 'p3']], ['p4', ['p4']]]);
+    const r = plan.solids[0].recipe;
+    expect(r.op).toBe('cut');
+    expect(r.op === 'cut' && r.a.op).toBe('join');
+    expect(recipePieces(r).map(p => p.fid)).toEqual(['p1', 'p2', 'p3']);
+    expect(plan.skipped.size).toBe(0);
   });
 
   it('finds which pull made the surface under the pointer', () => {
@@ -226,11 +233,78 @@ describe('drawing on faces', () => {
 
   it('pulling the block further moves what is drawn on its end along with it', () => {
     const doc = setPullDistance(block(), 'p1', 250);
-    expect(doc.features.find(f => f.id === 'p1')!.distance).toBe(250);
+    expect((doc.features.find(f => f.id === 'p1') as PullFeature).distance).toBe(250);
     const boss = doc.shapes.find(s => s.id === 'boss')!;
     expect(typeof boss.plane !== 'string' && boss.plane.origin).toEqual([0, -250, 0]);
     expect(doc.shapes.find(s => s.id === 'other')!.plane).toBe('ground');
     // The joined square is the same length; it just starts further out.
-    expect(doc.features.find(f => f.id === 'p2')!.distance).toBe(30);
+    expect((doc.features.find(f => f.id === 'p2') as PullFeature).distance).toBe(30);
+  });
+});
+
+describe('spin and run', () => {
+  const inchRect = (id: string, plane: Parameters<typeof rectanglePath>[1], x0: number, y0: number, x1: number, y1: number) =>
+    rectanglePath(id, plane, { x: inch(x0), y: inch(y0) }, { x: inch(x1), y: inch(y1) });
+
+  it('spins round an axis to one side of the shape (or along its edge), not through it', () => {
+    const r = inchRect('r', 'front', 2, 0, 3, 6);
+    expect(axisClearOfShape(r, [{ x: 0, y: 0 }, { x: 0, y: 10 }])).toBe(true);
+    expect(axisClearOfShape(r, [{ x: inch(2), y: 0 }, { x: inch(2), y: 10 }])).toBe(true); // along its edge
+    expect(axisClearOfShape(r, [{ x: inch(2.5), y: 0 }, { x: inch(2.5), y: 10 }])).toBe(false);
+    expect(axisClearOfShape(r, [{ x: 0, y: 0 }, { x: 0, y: 0 }])).toBe(false);
+
+    const doc = emptySketch('imperial');
+    doc.shapes.push(r);
+    doc.features.push({ id: 's1', type: 'spin', shapeId: 'r', axis: [{ x: 0, y: 0 }, { x: 0, y: 10 }], angle: 360 });
+    const plan = planSolids(doc);
+    expect(plan.solids[0].recipe).toMatchObject({ op: 'spin', origin: [0, 0, 0], direction: [0, 0, 10], angle: 360 });
+    doc.features[0] = { ...doc.features[0], axis: [{ x: inch(2.5), y: 0 }, { x: inch(2.5), y: 10 }] } as typeof doc.features[0];
+    expect(planSolids(doc).skipped.get('s1')).toMatch(/runs through the shape/);
+  });
+
+  it('runs a profile along a path, moving it along its normal to the path start', () => {
+    const doc = emptySketch('imperial');
+    // A room's wall line on the ground, starting 12" back and running back (+y);
+    // the cornice profile drawn on Front (y = 0) gets slid back to y = 12".
+    doc.shapes.push(
+      inchRect('prof', 'front', 0, 0, 2, 3),
+      { id: 'path', type: 'path', plane: 'ground', start: { x: 0, y: inch(12) }, closed: false,
+        segments: [{ kind: 'line', to: { x: 0, y: inch(60) } }, { kind: 'line', to: { x: inch(48), y: inch(60) } }] },
+    );
+    doc.features.push({ id: 'run1', type: 'run', shapeId: 'prof', pathId: 'path' });
+    const plan = planSolids(doc);
+    const r = plan.solids[0].recipe;
+    expect(r.op).toBe('run');
+    if (r.op === 'run') {
+      expect(typeof r.shape.plane !== 'string' && r.shape.plane.origin[1]).toBeCloseTo(inch(12));
+      expect(r.path.id).toBe('path');
+    }
+    expect(usedShapeIds(doc)).toEqual(new Set(['prof', 'path']));
+    // A path running along the profile's own plane cannot be followed.
+    doc.shapes[1] = { ...doc.shapes[1], segments: [{ kind: 'line', to: { x: inch(60), y: inch(12) } }] } as typeof doc.shapes[1];
+    expect(planSolids(doc).skipped.get('run1')).toMatch(/lies along the path/);
+    // Deleting the path deletes the run, and the profile comes back as an outline.
+    const gone = removeShape(doc, 'path');
+    expect(gone.features).toEqual([]);
+    expect(gone.shapes.map(s => s.id)).toEqual(['prof']);
+  });
+
+  it('a deleted step leaves its shape, and takes what was drawn on its faces', () => {
+    const doc = emptySketch('metric');
+    const end = faceFrame([0, -100, 0], [0, -1, 0]);
+    doc.shapes.push(
+      rectanglePath('base', 'front', { x: 0, y: 0 }, { x: 50, y: 50 }),
+      { ...rectanglePath('boss', end, { x: 10, y: 10 }, { x: 20, y: 20 }), onFeatureId: 'p1' },
+    );
+    doc.features.push({ id: 'p1', type: 'pull', shapeId: 'base', distance: 100 }, { id: 'p2', type: 'pull', shapeId: 'boss', distance: 5 });
+    const after = removeFeature(doc, 'p1');
+    expect(after.shapes.map(s => s.id)).toEqual(['base']);
+    expect(after.features).toEqual([]);
+  });
+
+  it('describes shapes for the step list', () => {
+    expect(describeShape(inchRect('r', 'front', 0, 0, 6, 4), 'imperial')).toBe('Rectangle 6" × 4"');
+    expect(describeShape({ id: 'c', type: 'circle', plane: 'front', center: { x: 0, y: 0 }, radius: inch(1.5) }, 'imperial')).toBe('Circle Ø 3"');
+    expect(describeShape({ id: 'p', type: 'path', plane: 'front', start: { x: 0, y: 0 }, closed: false, segments: [{ kind: 'line', to: { x: 1, y: 0 } }] }, 'metric')).toBe('Path, 1 piece');
   });
 });

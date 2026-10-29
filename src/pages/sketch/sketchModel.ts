@@ -119,7 +119,27 @@ export interface PullFeature {
   distance: number;
 }
 
-export type SketchFeature = PullFeature;
+/** Spin a closed shape around a line in its plane (a column, a rosette, a curved moulding). */
+export interface SpinFeature {
+  id: string;
+  type: 'spin';
+  shapeId: string;
+  /** Two points on the axis, in the shape's plane. */
+  axis: [Vec2, Vec2];
+  /** Degrees, counter-clockwise looking down the axis from its second point; 360 is all the way round. */
+  angle: number;
+}
+
+/** Run a closed profile along a path (a cornice round a room), mitred at the corners.
+ *  The profile is used where it is drawn, moved along its plane's normal to the path's start. */
+export interface RunFeature {
+  id: string;
+  type: 'run';
+  shapeId: string;
+  pathId: string;
+}
+
+export type SketchFeature = PullFeature | SpinFeature | RunFeature;
 
 export interface SketchDoc {
   format: typeof SKETCH_FORMAT;
@@ -282,24 +302,115 @@ export const toWorld = (plane: SketchPlane, p: Vec2): Vec3 => {
 };
 
 /** The shapes a pull has turned into solids (they are shown as solids, not lines). */
-export const pulledShapeIds = (doc: SketchDoc): Set<string> =>
-  new Set(doc.features.filter(f => f.type === 'pull').map(f => f.shapeId));
+/** The shapes steps have turned into solids (shown as solids, not lines): profiles, and the paths runs follow. */
+export const usedShapeIds = (doc: SketchDoc): Set<string> =>
+  new Set(doc.features.flatMap(f => (f.type === 'run' ? [f.shapeId, f.pathId] : [f.shapeId])));
 
 export const canPull = (s: SketchShape): boolean => s.type === 'circle' || (s.closed && s.segments.length >= 2);
 
-// ── Solids built from several pulls ─────────────────────────────────────────
+// ── Solids built from several steps ─────────────────────────────────────────
 
-/** Which solid each pull belongs to, keyed by pull id and valued by the id of
- *  the solid's first pull. A pull of a shape drawn on a face joins (or cuts)
- *  the solid that face belongs to; any other pull starts a solid of its own. */
-export const solidOfPull = (doc: SketchDoc): Map<string, string> => {
-  const root = new Map<string, string>();
-  for (const f of doc.features) {
-    const shape = doc.shapes.find(s => s.id === f.shapeId);
-    const on = shape?.onFeatureId ? root.get(shape.onFeatureId) : undefined;
-    root.set(f.id, on ?? f.id);
+/** How to build one solid with OpenCascade, worked out from the steps (no
+ *  geometry is made here, so it is quick and testable). The geometry worker
+ *  builds each recipe, and reuses the mesh of any recipe it has built before. */
+export type Recipe =
+  | { op: 'pull'; fid: string; shape: SketchShape; distance: number }
+  | { op: 'spin'; fid: string; shape: SketchShape; origin: Vec3; direction: Vec3; angle: number }
+  | { op: 'run'; fid: string; shape: SketchShape; path: SketchShape }
+  | { op: 'join' | 'cut'; fid: string; a: Recipe; b: Recipe };
+
+export interface PlannedSolid {
+  /** The id of the step that made it. */
+  id: string;
+  recipe: Recipe;
+  /** Every step that went into it, in order. */
+  featureIds: string[];
+  /** The pulls whose outline is still where it was drawn (for telling which one a click landed on). */
+  pullIds: string[];
+}
+
+export interface SolidPlan {
+  solids: PlannedSolid[];
+  /** Steps that could not be applied, and why. */
+  skipped: Map<string, string>;
+}
+
+/** Points along a shape as its first move leaves its start: the start, and a point a little way along. */
+const startAndHeading = (s: SketchShape): [Vec3, Vec3] => {
+  if (s.type === 'circle') {
+    const a = { x: s.center.x + s.radius, y: s.center.y };
+    return [toWorld(s.plane, a), toWorld(s.plane, { x: a.x, y: a.y + 1 })];
   }
-  return root;
+  const first = s.segments[0];
+  const next = !first ? s.start : first.kind === 'line' ? first.to : arcPoints(s.start, first.through, first.to, 48)[0];
+  return [toWorld(s.plane, s.start), toWorld(s.plane, next)];
+};
+
+/** Whether a spin axis (in the shape's plane) leaves the whole shape on one side; it may run along an edge. */
+export const axisClearOfShape = (shape: SketchShape, axis: [Vec2, Vec2]): boolean => {
+  const [a, b] = axis;
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+  if (len < 1e-9) return false;
+  let min = Infinity, max = -Infinity;
+  for (const p of shapeOutline(shape, 48)) {
+    const d = (dx * (p.y - a.y) - dy * (p.x - a.x)) / len;
+    min = Math.min(min, d);
+    max = Math.max(max, d);
+  }
+  const tol = 1e-3;
+  return min >= -tol || max <= tol;
+};
+
+/** Works out the solids the steps make, in order. */
+export const planSolids = (doc: SketchDoc): SolidPlan => {
+  const live = new Map<string, PlannedSolid>();
+  // Any step's id (or a solid's) → the solid it now belongs to.
+  const owner = new Map<string, string>();
+  const skipped = new Map<string, string>();
+  const resolve = (id: string | undefined) => {
+    const s = id && owner.get(id);
+    return s && live.has(s) ? s : undefined;
+  };
+  const shapeOf = (id: string) => doc.shapes.find(s => s.id === id);
+
+  for (const f of doc.features) {
+    const shape = shapeOf(f.shapeId);
+    if (!shape) { skipped.set(f.id, 'Its shape was deleted.'); continue; }
+    let piece: Recipe;
+    if (f.type === 'pull') {
+      piece = { op: 'pull', fid: f.id, shape, distance: f.distance };
+    } else if (f.type === 'spin') {
+      if (!axisClearOfShape(shape, f.axis)) { skipped.set(f.id, 'The axis runs through the shape. Put it to one side (it may run along an edge).'); continue; }
+      const o = toWorld(shape.plane, f.axis[0]), e = toWorld(shape.plane, f.axis[1]);
+      piece = { op: 'spin', fid: f.id, shape, origin: o, direction: [e[0] - o[0], e[1] - o[1], e[2] - o[2]], angle: f.angle };
+    } else {
+      const path = shapeOf(f.pathId);
+      if (!path) { skipped.set(f.id, 'Its path was deleted.'); continue; }
+      if (path.id === shape.id) { skipped.set(f.id, 'The profile and the path must be different shapes.'); continue; }
+      const [start, ahead] = startAndHeading(path);
+      const frame = frameOf(shape.plane);
+      const t: Vec3 = [ahead[0] - start[0], ahead[1] - start[1], ahead[2] - start[2]];
+      const tl = Math.hypot(...t) || 1;
+      if (Math.abs(dot(t, frame.normal)) / tl < 0.2) { skipped.set(f.id, 'The profile lies along the path. Draw it on a plane across the path’s start.'); continue; }
+      // Slide the profile along its plane's normal so it stands at the path's start.
+      const w = toPlane(shape.plane, start).w;
+      const moved: PlaneFrame = { ...frame, origin: [frame.origin[0] + frame.normal[0] * w, frame.origin[1] + frame.normal[1] * w, frame.origin[2] + frame.normal[2] * w] };
+      piece = { op: 'run', fid: f.id, shape: { ...shape, plane: moved }, path };
+    }
+    // A pull of a shape drawn on a solid's face joins or cuts that solid.
+    const target = f.type === 'pull' ? resolve(shape.onFeatureId) : undefined;
+    if (target) {
+      const solid = live.get(target)!;
+      solid.recipe = { op: (piece as { distance: number }).distance < 0 ? 'cut' : 'join', fid: f.id, a: solid.recipe, b: piece };
+      solid.featureIds.push(f.id);
+      solid.pullIds.push(f.id);
+      owner.set(f.id, target);
+      continue;
+    }
+    live.set(f.id, { id: f.id, recipe: piece, featureIds: [f.id], pullIds: f.type === 'pull' ? [f.id] : [] });
+    owner.set(f.id, f.id);
+  }
+  return { solids: [...live.values()], skipped };
 };
 
 /** Inside a closed outline, or within `tol` of its edge. */
@@ -320,7 +431,7 @@ const insideOrOn = (outline: Vec2[], p: Vec2, tol: number): boolean => {
  *  block's sides), or null when none does. */
 export const pullAtPoint = (doc: SketchDoc, pullIds: string[], p: Vec3, tol = 0.3): string | null => {
   for (const id of [...pullIds].reverse()) {
-    const f = doc.features.find(ff => ff.id === id);
+    const f = doc.features.find((ff): ff is PullFeature => ff.id === id && ff.type === 'pull');
     const shape = f && doc.shapes.find(s => s.id === f.shapeId);
     if (!f || !shape) continue;
     const q = toPlane(shape.plane, p);
@@ -335,7 +446,7 @@ const withDependents = (doc: SketchDoc, shapeIds: Iterable<string>): Set<string>
   const out = new Set(shapeIds);
   for (let grew = true; grew;) {
     grew = false;
-    const pulls = new Set(doc.features.filter(f => out.has(f.shapeId)).map(f => f.id));
+    const pulls = new Set(doc.features.filter(f => out.has(f.shapeId) || (f.type === 'run' && out.has(f.pathId))).map(f => f.id));
     for (const s of doc.shapes) {
       if (s.onFeatureId && pulls.has(s.onFeatureId) && !out.has(s.id)) { out.add(s.id); grew = true; }
     }
@@ -343,19 +454,30 @@ const withDependents = (doc: SketchDoc, shapeIds: Iterable<string>): Set<string>
   return out;
 };
 
-/** Removes a shape, its pull, and whatever was drawn on that pull's faces. */
+/** Removes a shape, the steps made from it (a run along it too), and whatever was drawn on their faces. */
 export const removeShape = (doc: SketchDoc, shapeId: string): SketchDoc => {
   const gone = withDependents(doc, [shapeId]);
-  return { ...doc, shapes: doc.shapes.filter(s => !gone.has(s.id)), features: doc.features.filter(f => !gone.has(f.shapeId)) };
+  return {
+    ...doc,
+    shapes: doc.shapes.filter(s => !gone.has(s.id)),
+    features: doc.features.filter(f => !gone.has(f.shapeId) && !(f.type === 'run' && gone.has(f.pathId))),
+  };
+};
+
+/** Removes one step, leaving its shape (as an outline again), and whatever was drawn on its faces. */
+export const removeFeature = (doc: SketchDoc, featureId: string): SketchDoc => {
+  let next: SketchDoc = { ...doc, features: doc.features.filter(f => f.id !== featureId) };
+  for (const s of doc.shapes) if (s.onFeatureId === featureId && next.shapes.some(x => x.id === s.id)) next = removeShape(next, s.id);
+  return next;
 };
 
 /** Changes how far a pull goes. Shapes drawn on the end it moves, and
  *  anything built on them, move with that end. */
 export const setPullDistance = (doc: SketchDoc, featureId: string, distance: number): SketchDoc => {
-  const f = doc.features.find(ff => ff.id === featureId);
+  const f = doc.features.find((ff): ff is PullFeature => ff.id === featureId && ff.type === 'pull');
   const shape = f && doc.shapes.find(s => s.id === f.shapeId);
   if (!f || !shape) return doc;
-  const features = doc.features.map(ff => (ff.id === featureId ? { ...ff, distance } : ff));
+  const features = doc.features.map(ff => (ff.id === featureId ? { ...f, distance } : ff));
   const base = frameOf(shape.plane);
   const onEnd = doc.shapes.filter(s => {
     if (s.onFeatureId !== featureId || typeof s.plane === 'string') return false;
@@ -368,4 +490,23 @@ export const setPullDistance = (doc: SketchDoc, featureId: string, distance: num
   const shapes = doc.shapes.map(s =>
     moving.has(s.id) && typeof s.plane !== 'string' ? { ...s, plane: { ...s.plane, origin: shift(s.plane.origin) } } : s);
   return { ...doc, shapes, features };
+};
+
+/** The steps that made pieces of a solid (pulls, spins and runs), in order, as built (a run's profile where it was moved to). */
+export type RecipePiece = Exclude<Recipe, { op: 'join' | 'cut' }>;
+export const recipePieces = (r: Recipe): RecipePiece[] =>
+  'a' in r ? [...recipePieces(r.a), ...recipePieces(r.b)] : [r];
+
+/** A shape in a few words, for the step list: "Rectangle 6" × 4"", "Circle Ø 3"", "Shape, 7 sides". */
+export const describeShape = (s: SketchShape, units: SketchUnits): string => {
+  if (s.type === 'circle') return `Circle Ø ${formatLength(s.radius * 2, units)}`;
+  const pts = [s.start, ...s.segments.map(g => g.to)];
+  const square = s.closed && s.segments.length === 4 && s.segments.every(g => g.kind === 'line')
+    && s.segments.every((g, i) => { const p = pts[i]; return Math.abs(g.to.x - p.x) < 1e-6 || Math.abs(g.to.y - p.y) < 1e-6; });
+  if (square) {
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    return `Rectangle ${formatLength(Math.max(...xs) - Math.min(...xs), units)} × ${formatLength(Math.max(...ys) - Math.min(...ys), units)}`;
+  }
+  const n = s.segments.length;
+  return s.closed ? `Shape, ${n} sides` : `Path, ${n} ${n === 1 ? 'piece' : 'pieces'}`;
 };

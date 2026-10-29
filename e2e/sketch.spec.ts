@@ -172,3 +172,94 @@ test('Sketch: Backspace steps back after typed lengths; draw on a face and cut i
   expect(slot.onFeatureId).toBe(saved.features[0].id);
   expect(saved.features[1].distance).toBeCloseTo(-inch, 3);
 });
+
+test('Sketch: spin a profile round a line, run a profile along a path, and change and delete steps in the list', async ({ authedPage: page, apiToken, request }) => {
+  const auth = { Authorization: `Bearer ${apiToken.token}` };
+  await page.goto('/tools/sketch?new=1');
+  await page.getByLabel('Name').fill('Spin and run');
+  await page.getByTestId('new-sketch-create').click();
+  await expect(page).toHaveURL(/\/tools\/sketch\?fileId=/);
+  const fileId = new URL(page.url()).searchParams.get('fileId')!;
+  const box = await viewBox(page);
+  const cx = box.x + box.width / 2 - 100, cy = box.y + box.height / 2 + 120;
+
+  // A 1" × 6" upright rectangle on Front, spun round its left edge.
+  await page.getByTestId('sketch-tool-rect').click();
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await page.mouse.move(cx + 60, cy - 60);
+  await page.getByTestId('sketch-typed-0').fill('1');
+  await page.getByTestId('sketch-typed-1').fill('6');
+  await page.getByTestId('sketch-typed-1').press('Enter');
+  await page.getByTestId('sketch-tool-spin').click();
+  await page.mouse.click(cx + 12, cy - 40);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('first point of the line');
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await page.mouse.move(cx, cy - 120);
+  await page.mouse.click(cx, cy - 120);
+  await expect(page.locator('.sketch-label-pull', { hasText: '⟳ 360°' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/could not/)).toHaveCount(0);
+
+  // The step list shows it; a quarter turn instead.
+  const steps = page.getByTestId('sketch-steps');
+  await expect(steps).toBeVisible();
+  await expect(page.getByTestId('sketch-step-0')).toContainText('Spin 360°');
+  await expect(page.getByTestId('sketch-step-0')).toContainText('Rectangle 1" × 6"');
+  await page.getByTestId('sketch-step-0').getByRole('button').first().click();
+  await page.getByTestId('sketch-step-value').fill('90');
+  await page.getByTestId('sketch-step-value').press('Enter');
+  await expect(page.locator('.sketch-label-pull', { hasText: '⟳ 90°' })).toBeVisible({ timeout: 60_000 });
+
+  // A path on Front: up 24", then right 12". A 2" square profile on Ground, across its start.
+  await page.getByTestId('sketch-view-front').click();
+  await page.getByTestId('sketch-plane-front').click();
+  await page.getByTestId('sketch-tool-line').click();
+  const px = cx + 250;
+  await page.mouse.move(px, cy);
+  await page.mouse.click(px, cy);
+  for (const [len, ang, toward] of [['24', '90', [px - cx, -200]], ['12', '0', [px - cx + 200, -100]]] as const) {
+    await page.mouse.move(cx + toward[0], cy + toward[1]);
+    await page.getByTestId('sketch-typed-0').fill(len);
+    await page.getByTestId('sketch-typed-1').fill(ang);
+    await page.getByTestId('sketch-typed-1').press('Enter');
+  }
+  await page.keyboard.press('Escape'); // leave the size box
+  await page.mouse.move(px + 300, cy - 300);
+  await page.keyboard.press('Enter'); // keep it as an open path
+  await page.getByTestId('sketch-plane-ground').click();
+  await page.getByTestId('sketch-tool-rect').click();
+  await expect(page.getByTestId('sketch-view-top')).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.move(px, cy);
+  await page.mouse.click(px, cy);
+  await page.mouse.move(px + 60, cy - 60);
+  await page.getByTestId('sketch-typed-0').fill('2');
+  await page.getByTestId('sketch-typed-1').fill('2');
+  await page.getByTestId('sketch-typed-1').press('Enter');
+
+  // Run: the profile (seen from the top), then the path (seen from the front).
+  await page.getByTestId('sketch-tool-run').click();
+  await page.mouse.click(px + 15, cy - 15);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('click the path');
+  await page.getByTestId('sketch-view-front').click();
+  await page.mouse.click(px, cy - 80);
+  await expect(page.getByTestId('sketch-step-1')).toContainText('Run along a path');
+  await expect(page.getByTestId('sketch-step-1')).toContainText('Rectangle 2" × 2"');
+  await expect(page.locator('.sketch-label-pull', { hasText: '⟳ 90°' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/could not/)).toHaveCount(0);
+
+  await page.getByTestId('sketch-save').click();
+  await expect(page.getByText('Saved as version 2')).toBeVisible();
+  let saved = JSON.parse(await (await request.get(`/api/files/${fileId}/content`, { headers: auth })).text());
+  expect(saved.features.map((f: { type: string }) => f.type)).toEqual(['spin', 'run']);
+  expect(saved.features[0].angle).toBe(90);
+
+  // Deleting the run in the list leaves its profile and path as outlines.
+  await page.getByTestId('sketch-step-1').getByTestId('sketch-step-delete').click();
+  await expect(page.getByTestId('sketch-step-1')).toHaveCount(0);
+  await page.getByTestId('sketch-save').click();
+  await expect(page.getByText('Saved as version 3')).toBeVisible();
+  saved = JSON.parse(await (await request.get(`/api/files/${fileId}/content`, { headers: auth })).text());
+  expect(saved.features.map((f: { type: string }) => f.type)).toEqual(['spin']);
+  expect(saved.shapes).toHaveLength(3);
+});
