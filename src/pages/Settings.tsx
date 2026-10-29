@@ -29,6 +29,16 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.7',
+    date: 'October 29, 2026',
+    changes: [
+      'New (first stage, still in progress): Sketch, a simple 3D drawing tool for measured shapes such as a cornice profile. Open it from the sidebar, right below Document Editor, or from Documents > New > Sketch. Each sketch is saved in Documents (in a project if you pick one), and each Save keeps a new version.',
+      'Sketch: draw lines, arcs, rectangles and circles on the Front, Side or Ground plane, then use Pull to turn a closed shape into a solid. Type exact sizes as you draw (feet and inches, or millimetres, chosen per sketch); points snap to ends, the grid and 45° angles, and every edge is labelled with its length. Top, Front, Side and 3D views: scroll or pinch to zoom, right-drag or two-finger drag to pan, and in 3D drag with the Select tool to turn the model.',
+      'Sketch: one person edits a sketch at a time; others can look and see it update when it is saved. Phones open sketches to view only. The 3D engine is a large download the first time a sketch opens.',
+      'Fix: dialog buttons and the bottom of the sidebar no longer sit flush against the bottom edge.',
+    ],
+  },
+  {
     version: '4.6.6',
     date: 'October 29, 2026',
     changes: [

@@ -4,7 +4,8 @@
 // sizes — moved here so the preview components don't have to import from the
 // table that renders them.
 import React from 'react';
-import { File, FileText, Image as ImageIcon, Presentation, Sheet } from 'lucide-react';
+import { File, FileText, Image as ImageIcon, PencilRuler, Presentation, Sheet } from 'lucide-react';
+import { SKETCH_MIME } from '../sketch/sketchModel';
 import { officeFormatOf } from '../../utils/officeFormats';
 
 export const MimeIcon: React.FC<{ mime: string; size?: number; className?: string }> = ({
@@ -16,5 +17,6 @@ export const MimeIcon: React.FC<{ mime: string; size?: number; className?: strin
   if (documentType === 'slide') return <Presentation {...props} />;
   if (documentType) return <FileText {...props} />;
   if (mime.startsWith('image/')) return <ImageIcon {...props} />;
+  if (mime === SKETCH_MIME) return <PencilRuler {...props} />;
   return <File {...props} />;
 };

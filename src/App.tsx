@@ -27,6 +27,8 @@ import { Login } from './pages/Login';
 import { RestorePage } from './pages/RestorePage';
 import { Settings } from './pages/Settings';
 import { DocumentEditor } from './pages/DocumentEditor';
+// Loaded on demand: the sketch editor brings three.js and a 23 MB CAD engine.
+const SketchPage = React.lazy(() => import('./pages/sketch/SketchPage'));
 import { TasksPage } from './pages/TasksPage';
 import { TimeKeeping } from './pages/TimeKeeping';
 import { CustomersSplitView } from './pages/customers/CustomersSplitView';
@@ -166,6 +168,14 @@ const router = createBrowserRouter([
         {
           path: 'tools/edit',
           element: <DocumentEditor />,
+        },
+        {
+          path: 'tools/sketch',
+          element: (
+            <React.Suspense fallback={<div className="p-8 text-sm text-ink-soft">Opening Sketch…</div>}>
+              <SketchPage />
+            </React.Suspense>
+          ),
         },
         {
           // A mail attachment in the ONLYOFFICE viewer (Phase 6).

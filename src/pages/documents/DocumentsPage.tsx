@@ -6,8 +6,8 @@
 // per-project Documents nav entry) can land here pre-filtered by composing
 // the same query string.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { ChevronDown, FilePlus2, FileSignature, FolderOpen, Upload } from 'lucide-react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { ChevronDown, FilePlus2, FileSignature, FolderOpen, PencilRuler, Upload } from 'lucide-react';
 import { Customer } from '../../types';
 import {
   DocumentRow, ProjectSummary, deleteFile, fetchFileBlob, getCustomers, getDocumentTypes,
@@ -84,6 +84,7 @@ export const DocumentsPage: React.FC<{ projectId?: string }> = ({ projectId: loc
   const q = searchParams.get('q') ?? '';
   const archived = searchParams.get('archived') === '1';
   const admin = useMemo(() => isAdmin(), []);
+  const navigate = useNavigate();
   // Ignored server-side for a non-admin regardless of what's in the URL, but
   // also gated client-side so a non-admin who hand-edits the URL never even
   // sends the param or sees the (unrendered) toggle reflect it.
@@ -388,23 +389,33 @@ export const DocumentsPage: React.FC<{ projectId?: string }> = ({ projectId: loc
           <div className="relative" ref={newMenuRef}>
             <Button
               variant="secondary" data-testid="documents-new"
-              aria-haspopup={admin ? 'menu' : undefined} aria-expanded={admin ? newMenuOpen : undefined}
-              onClick={() => (admin ? setNewMenuOpen(o => !o) : setNewDocType('docx'))}
+              aria-haspopup="menu" aria-expanded={newMenuOpen}
+              onClick={() => setNewMenuOpen(o => !o)}
             >
-              <FilePlus2 size={15} />New document{admin && <ChevronDown size={13} />}
+              <FilePlus2 size={15} />New document<ChevronDown size={13} />
             </Button>
-            {admin && newMenuOpen && (
+            {newMenuOpen && (
               <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-64 rounded-lg border border-edge bg-raised py-1 shadow-lg">
                 <button role="menuitem" type="button" data-testid="documents-new-document"
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink hover:bg-hover"
                   onClick={() => { setNewMenuOpen(false); setNewDocType('docx'); }}>
                   <FilePlus2 size={14} />Document, spreadsheet or PDF form
                 </button>
-                <button role="menuitem" type="button" data-testid="documents-new-lien-release"
+                <button role="menuitem" type="button" data-testid="documents-new-sketch"
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink hover:bg-hover"
-                  onClick={() => { setNewMenuOpen(false); setLienOpen(true); }}>
-                  <FileSignature size={14} />Release of lien
+                  onClick={() => {
+                    setNewMenuOpen(false);
+                    navigate(`/tools/sketch?new=1${projectIds.length === 1 ? `&projectId=${encodeURIComponent(projectIds[0])}` : ''}`);
+                  }}>
+                  <PencilRuler size={14} />Sketch
                 </button>
+                {admin && (
+                  <button role="menuitem" type="button" data-testid="documents-new-lien-release"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink hover:bg-hover"
+                    onClick={() => { setNewMenuOpen(false); setLienOpen(true); }}>
+                    <FileSignature size={14} />Release of lien
+                  </button>
+                )}
               </div>
             )}
           </div>

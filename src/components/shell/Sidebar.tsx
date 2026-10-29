@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Menu, PanelLeftClose, Search, FolderKanban, ListTodo, Clock,
   FileEdit, Settings, LogOut, Sun, Moon,
-  FolderOpen, LayoutDashboard, Users, Mail, BarChart3,
+  FolderOpen, LayoutDashboard, Users, Mail, BarChart3, PencilRuler,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useMailUnread } from '../../pages/mail/useMailUnread';
@@ -39,6 +39,7 @@ const WORKSPACE_NAV: NavEntry[] = [
 
 const TOOLS_NAV: NavEntry[] = [
   { id: 'document-editor', label: 'Document Editor', Icon: FileEdit, path: '/tools/edit', match: p => p.startsWith('/tools/edit') },
+  { id: 'sketch', label: 'Sketch', Icon: PencilRuler, path: '/tools/sketch', match: p => p.startsWith('/tools/sketch') },
 ];
 
 // Row used by every nav item. The active item gets the glow treatment —
@@ -212,7 +213,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ state, onChange, locked = fals
       </div>
 
       {/* Footer */}
-      <div className="px-2 pb-3 pt-2 pb-safe border-t border-edge space-y-0.5 shrink-0">
+      <div className="px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-edge space-y-0.5 shrink-0">
         {/* Who's online, with the notification bell beside it (stacked on the thin rail). */}
         <div className={expanded ? 'flex items-center gap-1' : 'flex flex-col gap-0.5'}>
           <div className="min-w-0 flex-1"><SidebarPresence expanded={expanded} /></div>

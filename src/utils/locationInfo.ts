@@ -21,9 +21,9 @@ export function locationFromPath(pathname: string, search: string, label?: strin
     section = projectMatch[2] || 'overview';
     if (projectMatch[2] === 'page' && projectMatch[3]) pageId = projectMatch[3];
   }
-  // The document editor names the file it has open, so Documents rows can
-  // show who is in it (FileViewerDots).
-  if (pathname === '/tools/edit') {
+  // The document and sketch editors name the file they have open, so
+  // Documents rows can show who is in it (FileViewerDots).
+  if (pathname === '/tools/edit' || pathname === '/tools/sketch') {
     fileId = new URLSearchParams(search).get('fileId') || undefined;
   }
   return { path: pathname, projectId, section, pageId, fileId, label };

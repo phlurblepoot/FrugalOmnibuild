@@ -60,7 +60,7 @@ beforeEach(() => {
 describe('Sidebar — company mode', () => {
   it('shows workspace and tools nav groups', () => {
     renderAt('/');
-    for (const label of ['Dashboard', 'Projects', 'Tasks', 'Documents', 'Mail', 'Time', 'Document Editor', 'Settings']) {
+    for (const label of ['Dashboard', 'Projects', 'Tasks', 'Documents', 'Mail', 'Time', 'Document Editor', 'Sketch', 'Settings']) {
       expect(screen.getByRole('button', { name: new RegExp(label) })).toBeInTheDocument();
     }
   });

@@ -3,6 +3,7 @@
 // logic for turning a stored file into either the document editor, a raw
 // image view, or a plain download, based on its type.
 import { officeFormatOf } from '../../utils/officeFormats';
+import { SKETCH_MIME } from '../sketch/sketchModel';
 
 export const SHEET_MIMES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -34,9 +35,11 @@ export type OpenTargetType = 'edit' | 'image' | 'download';
 
 /** Where "Open" takes a file: PDFs, Word, Excel, PowerPoint and the older
  *  formats all open in the ONLYOFFICE document editor (read-only where they
- *  can't be edited); images open raw in a tab; anything else downloads. */
+ *  can't be edited); sketches open in the sketch editor; images open raw in a
+ *  tab; anything else downloads. */
 export const openTargetFor = (f: { id: string; mime: string; name?: string | null }): { type: OpenTargetType; url: string | null } => {
   if (officeFormatOf(f)) return { type: 'edit', url: `/tools/edit?fileId=${encodeURIComponent(f.id)}` };
+  if (f.mime === SKETCH_MIME) return { type: 'edit', url: `/tools/sketch?fileId=${encodeURIComponent(f.id)}` };
   if (f.mime.startsWith('image/')) return { type: 'image', url: `/api/images/${f.id}/raw` };
   return { type: 'download', url: null };
 };

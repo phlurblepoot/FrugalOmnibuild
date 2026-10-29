@@ -6,6 +6,7 @@ import {
   ListTodo, Clock, CornerDownLeft, X, Keyboard,
   AlertCircle, ClipboardCheck, StickyNote, DollarSign, SlidersHorizontal, LayoutGrid,
   MessageCircleQuestion, CalendarDays, Mail, FilePlus2, BarChart3,
+  PencilRuler,
 } from 'lucide-react';
 import { searchAll, SearchResult, getMyTimeEntries, clockIn, clockOut } from '../utils/store';
 import { useToast } from './Toast';
@@ -100,6 +101,7 @@ export const CommandPalette: React.FC = () => {
     { id: 'a:projects', type: 'action', title: 'Projects', icon: <FolderOpen size={16} />, run: () => navigate('/projects') },
     { id: 'a:settings', type: 'action', title: 'Settings', icon: <SettingsIcon size={16} />, run: () => navigate('/settings') },
     { id: 'a:editor', type: 'action', title: 'Document editor', subtitle: 'Open a PDF, Word or Excel file', icon: <FileText size={16} />, run: () => navigate('/tools/edit') },
+    { id: 'a:sketch', type: 'action', title: 'Sketch', subtitle: 'Draw a measured 3D detail', icon: <PencilRuler size={16} />, run: () => navigate('/tools/sketch') },
     // Open the New document dialog on the Documents page, filed in the
     // project you are in (ONLYOFFICE Phase 3).
     ...([['docx', 'New Word document'], ['xlsx', 'New spreadsheet'], ['pdf', 'New PDF form']] as const).map(([type, title]) => ({

@@ -1262,6 +1262,18 @@ export const getFileMeta = async (id: string): Promise<ProjectFile | null> => {
   return await res.json();
 };
 
+// Saves new content for an existing file as a new version (the old content
+// stays in its version history).
+export const saveFileVersion = async (id: string, blob: Blob): Promise<{ versionNumber: number }> => {
+  const res = await fetchWithRetry(`/api/files/${encodeURIComponent(id)}/versions`, {
+    method: 'POST',
+    headers: { 'Content-Type': blob.type || 'application/octet-stream', ...getAuthHeaders() },
+    body: blob,
+  }, { timeoutMs: 300_000 });
+  await handleResponse(res);
+  return await res.json();
+};
+
 export const listFileVersions = async (id: string): Promise<ProjectFile[]> => {
   const res = await fetchWithRetry(`/api/files/${encodeURIComponent(id)}/versions`, {
     headers: { ...getAuthHeaders() },

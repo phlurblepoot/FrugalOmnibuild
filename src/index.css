@@ -212,16 +212,14 @@ html.solid-surfaces body { background: var(--surface) !important; }
 
 /* ── Mobile / touch helpers (Phase 8) ─────────────────────────────────────
    no-scrollbar: hide the scrollbar on overflow-x-auto tab/toolbar rows.
-   pb-safe / pt-safe: honour iOS home-bar / notch safe-area insets. */
+   pt-safe: honour the iOS notch safe-area inset. (Bottoms that need the
+   home-bar inset use pb-[max(<normal padding>,env(safe-area-inset-bottom))]
+   so they keep their own padding on other screens.) */
 @utility no-scrollbar {
   scrollbar-width: none;
   &::-webkit-scrollbar {
     display: none;
   }
-}
-
-@utility pb-safe {
-  padding-bottom: env(safe-area-inset-bottom);
 }
 
 @utility pt-safe {
@@ -420,3 +418,41 @@ html {
   animation: breathing-pulse 2.4s ease-in-out infinite;
 }
 .motion-reduce .breathing { animation: none; filter: brightness(1); }
+
+/* ── Sketch editor (src/pages/sketch) ─────────────────────────────────────
+   Dimension labels and the snap marker are HTML laid over the 3D view
+   (three.js CSS2DRenderer), so they stay crisp and follow the theme. */
+.sketch-label {
+  font: 600 11px/1.2 var(--font-sans);
+  white-space: nowrap;
+  padding: 1px 4px;
+  border-radius: 4px;
+  pointer-events: none;
+  user-select: none;
+}
+.sketch-label-dim {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--raised) 85%, transparent);
+  border: 1px solid var(--edge);
+}
+.sketch-label-pull {
+  color: #fff;
+  background: #c026d3;
+}
+.sketch-label-readout {
+  color: #fff;
+  background: #a21caf;
+  font-size: 12px;
+  padding: 2px 6px;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+}
+.sketch-snap {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  border: 2px solid #94a3b8;
+  background: transparent;
+  pointer-events: none;
+}
+.sketch-snap-point { border-color: #16a34a; background: #16a34a55; }
+.sketch-snap-angle { border-color: #c026d3; }

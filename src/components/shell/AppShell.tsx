@@ -16,9 +16,9 @@ export const AppShell: React.FC<{ appName: string; children: React.ReactNode }> 
   // itself is inside the drawer.
   const { unread } = useNotifications();
   const isCanvasPage = !!matchPath('/project/:projectId/page/:pageId', location.pathname);
-  // A file open in the document editor gets the same thin rail as the canvas:
-  // ONLYOFFICE's toolbar wants the width.
-  const isEditorOpen = (location.pathname === '/tools/edit' && new URLSearchParams(location.search).has('fileId'))
+  // A file open in the document editor or the sketch editor gets the same thin
+  // rail as the canvas: their toolbars want the width.
+  const isEditorOpen = ((location.pathname === '/tools/edit' || location.pathname === '/tools/sketch') && new URLSearchParams(location.search).has('fileId'))
     || location.pathname === '/tools/view';
 
   const [sidebarState, setSidebarState] = useState<SidebarState>(() => {

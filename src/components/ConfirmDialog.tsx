@@ -86,7 +86,7 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
                   </div>
                 </div>
               </div>
-              <div className="px-6 py-4 pb-safe bg-sunken/40 flex flex-wrap justify-end gap-3">
+              <div className="px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-sunken/40 flex flex-wrap justify-end gap-3">
                 <button
                   onClick={() => close(false)}
                   className="px-4 py-2 rounded-xl border border-edge-strong text-sm font-medium text-ink-soft hover:bg-hover transition-all"

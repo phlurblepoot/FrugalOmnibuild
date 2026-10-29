@@ -7,6 +7,9 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
+    // The sketch editor's geometry worker imports replicad and its OpenCascade
+    // build as ES modules, so workers are bundled as modules too.
+    worker: { format: 'es' },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
