@@ -31,6 +31,10 @@ export default defineConfig({
       // The OAuth connect flow (and its redirect-URI display) needs a public
       // origin to build against; matches the `url` above.
       APP_PUBLIC_URL: 'http://localhost:3000',
+      // AI_FAKE_CLAUDE=1: Claude sheet reading answers from a canned responder
+      // (server/ai/fakeClaude.ts) — the e2e server has no Claude credentials,
+      // and tests never call Claude.
+      AI_FAKE_CLAUDE: '1',
     },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

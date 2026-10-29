@@ -10,7 +10,7 @@ const fakeRunner = (over: Partial<AiRunner> = {}): AiRunner => ({
   configured: () => true,
   state: () => Promise.resolve('ready'),
   warmup: () => {},
-  info: () => ({ model: 'fake', device: 'cuda' }),
+  info: () => ({ model: 'fake', device: 'cloud' }),
   readSheet: () => Promise.resolve(okRead),
   matchSheet: () => Promise.resolve(okMatch),
   transcribeRegion: () => Promise.resolve(okTranscribe),
@@ -21,7 +21,7 @@ const loadImage = (id: string) => (id === 'img1' ? Buffer.from('jpeg') : null);
 
 describe('handleStatus', () => {
   it('reports availability + info + ready state', async () => {
-    expect(await handleStatus(fakeRunner())).toEqual({ status: 200, body: { available: true, state: 'ready', model: 'fake', device: 'cuda' } });
+    expect(await handleStatus(fakeRunner())).toEqual({ status: 200, body: { available: true, state: 'ready', model: 'fake', device: 'cloud', provider: 'claude', lastError: null } });
   });
   it('reports idle state when configured but not yet loaded', async () => {
     const r = await handleStatus(fakeRunner({ state: () => Promise.resolve('idle') }));
@@ -54,6 +54,17 @@ describe('handleReadSheet', () => {
   it('404 when the imageId is unknown', async () => {
     const r = await handleReadSheet(fakeRunner(), loadImage, { imageId: 'nope' });
     expect(r.status).toBe(404);
+  });
+  it('passes the title-block crop along when given', async () => {
+    let got: Buffer | undefined;
+    const runner = fakeRunner({ readSheet: (input) => { got = input.titleBlock; return Promise.resolve(okRead); } });
+    await handleReadSheet(runner, loadImage, { imageId: 'img1', titleBlockBase64: Buffer.from('tb').toString('base64') });
+    expect(got?.toString()).toBe('tb');
+  });
+  it('502 with the runner\'s message and code when Claude fails', async () => {
+    const err = Object.assign(new Error('Claude usage or rate limit reached.'), { code: 'rate_limit' });
+    const r = await handleReadSheet(fakeRunner({ readSheet: () => Promise.reject(err) }), loadImage, { imageId: 'img1' });
+    expect(r).toEqual({ status: 502, body: { error: 'Claude usage or rate limit reached.', code: 'rate_limit' } });
   });
   it('502 when the model throws', async () => {
     const r = await handleReadSheet(fakeRunner({ readSheet: () => Promise.reject(new Error('boom')) }), loadImage, { imageId: 'img1' });

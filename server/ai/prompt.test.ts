@@ -31,6 +31,14 @@ describe('parseReadResponse', () => {
     expect(parseReadResponse('{"sheetNumber":"A1","sheetTitle":"x","confidence":5}').confidence).toBe(1);
     expect(parseReadResponse('{"sheetNumber":"A1","sheetTitle":"x","confidence":-3}').confidence).toBe(0);
   });
+  it('is not fooled by braces inside strings, and tolerates a code fence', () => {
+    const r = parseReadResponse('```json\n{"sheetNumber":"A-1","sheetTitle":"Plan {Level 2}","confidence":0.7}\n```');
+    expect(r).toMatchObject({ sheetNumber: 'A-1', sheetTitle: 'Plan {Level 2}', confidence: 0.7 });
+  });
+  it('treats fields of the wrong type as missing', () => {
+    const r = parseReadResponse('{"sheetNumber":{"v":"A-1"},"sheetTitle":42,"confidence":"high"}');
+    expect(r).toEqual({ sheetNumber: '', sheetTitle: '', discipline: undefined, confidence: 0 });
+  });
   it('returns a low-confidence empty read on unparseable output', () => {
     expect(parseReadResponse('the model said nothing useful')).toEqual({ sheetNumber: '', sheetTitle: '', confidence: 0 });
   });

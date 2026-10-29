@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { runWithConcurrency, applyReadToPage, applyMatchToPage, type AiPage } from './aiSheets';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { runWithConcurrency, applyReadToPage, applyMatchToPage, readSheet, getLastAiError, aiScanSummary, type AiPage } from './aiSheets';
 
 describe('runWithConcurrency', () => {
   it('runs all items, never exceeding the limit, preserving order', async () => {
@@ -45,5 +45,35 @@ describe('applyMatchToPage', () => {
   });
   it('does not override when confidence is below 0.5', () => {
     expect(applyMatchToPage(base, { matchSheetId: 's2', confidence: 0.3 }).matchSheetId).toBeUndefined();
+  });
+});
+
+describe('readSheet errors and the scan summary', () => {
+  const respond = (status: number, body: unknown) =>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: status < 400, status, json: async () => body }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('says why reads failed and that the pages keep their names', async () => {
+    respond(502, { error: 'Claude usage or rate limit reached.', code: 'rate_limit' });
+    expect(await readSheet({ imageBase64: 'x' })).toBeNull();
+    expect(getLastAiError()).toBe('Claude usage or rate limit reached.');
+    expect(aiScanSummary(1, 3)).toEqual({
+      message: 'Claude read 1 of 3 pages. Claude usage or rate limit reached. The other pages keep their names; you can use Extract (text/OCR) for them.',
+      type: 'warning',
+    });
+    expect(aiScanSummary(0, 3).type).toBe('error');
+  });
+
+  it('a 503 means Claude is not connected', async () => {
+    respond(503, { error: 'ai unavailable' });
+    await readSheet({ imageBase64: 'x' });
+    expect(getLastAiError()).toMatch(/not connected/);
+  });
+
+  it('a success clears the error', async () => {
+    respond(200, { sheetNumber: 'A-1', sheetTitle: '', confidence: 1 });
+    expect(await readSheet({ imageBase64: 'x' })).toMatchObject({ sheetNumber: 'A-1' });
+    expect(getLastAiError()).toBeNull();
+    expect(aiScanSummary(2, 2)).toEqual({ message: 'Claude read 2 of 2 pages.', type: 'success' });
   });
 });

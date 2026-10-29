@@ -8,7 +8,18 @@ export type ImageLoader = (id: string) => Buffer | null;
 export async function handleStatus(runner: AiRunner): Promise<HandlerResult> {
   const state = await runner.state();
   const info = runner.info();
-  return { status: 200, body: { available: runner.configured(), state, model: info.model, device: info.device } };
+  return {
+    status: 200,
+    body: {
+      available: runner.configured(), state, model: info.model, device: info.device,
+      provider: 'claude', lastError: runner.lastError?.() ?? null,
+    },
+  };
+}
+
+/** A failed call: 502 with the runner's plain-words message and its code. */
+function failure(e: any): HandlerResult {
+  return { status: 502, body: { error: String(e?.message ?? e), code: e?.code ?? 'other' } };
 }
 
 function decodeBase64Image(input: string): Buffer | null {
@@ -20,7 +31,7 @@ function decodeBase64Image(input: string): Buffer | null {
 export async function handleReadSheet(
   runner: AiRunner,
   loadImage: ImageLoader,
-  body: { imageId?: string; imageBase64?: string; embeddedText?: string; prompt?: string; idleTimeoutMs?: number },
+  body: { imageId?: string; imageBase64?: string; titleBlockBase64?: string; embeddedText?: string; prompt?: string; idleTimeoutMs?: number },
 ): Promise<HandlerResult> {
   if (!runner.configured()) return { status: 503, body: { error: 'ai unavailable' } };
 
@@ -35,11 +46,13 @@ export async function handleReadSheet(
     return { status: 400, body: { error: 'imageId or imageBase64 required' } };
   }
 
+  const titleBlock = body.titleBlockBase64 ? decodeBase64Image(body.titleBlockBase64) ?? undefined : undefined;
+
   try {
-    const read = await runner.readSheet({ image, embeddedText: body.embeddedText, prompt: body.prompt, idleTimeoutMs: body.idleTimeoutMs });
+    const read = await runner.readSheet({ image, titleBlock, embeddedText: body.embeddedText, prompt: body.prompt, idleTimeoutMs: body.idleTimeoutMs });
     return { status: 200, body: read };
   } catch (e: any) {
-    return { status: 502, body: { error: String(e?.message ?? e) } };
+    return failure(e);
   }
 }
 
@@ -54,7 +67,7 @@ export async function handleMatchSheet(
     const match = await runner.matchSheet({ page: body.page, existing, idleTimeoutMs: body.idleTimeoutMs });
     return { status: 200, body: match };
   } catch (e: any) {
-    return { status: 502, body: { error: String(e?.message ?? e) } };
+    return failure(e);
   }
 }
 
@@ -73,7 +86,7 @@ export async function handleTranscribeRegion(
     const result = await runner.transcribeRegion({ image, mode: body.mode, idleTimeoutMs: body.idleTimeoutMs });
     return { status: 200, body: result };
   } catch (e: any) {
-    return { status: 502, body: { error: String(e?.message ?? e) } };
+    return failure(e);
   }
 }
 

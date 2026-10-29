@@ -14,7 +14,7 @@ import { MySignatures } from './settings/MySignatures';
 import { PhoneNotifications } from './settings/PhoneNotifications';
 import { TemplatesView } from './TemplatesView';
 import { useTheme, AccentKey } from '../context/ThemeContext';
-import { getAiStatus, aiAutoNameEnabled, setAiAutoNameEnabled, type AiStatus } from '../utils/aiSheets';
+import { ClaudeAiCard } from './settings/ClaudeAiCard';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Button, Field, Input, NumberInput } from '../components/ui';
@@ -31,6 +31,15 @@ interface ChangelogEntry {
 }
 
 const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '4.7.0.1',
+    date: 'October 29, 2026',
+    changes: [
+      'AI sheet reading, part 1: Claude now reads plan sheets instead of the local GPU model. An admin connects it once under Settings › User Preferences › AI Sheet Reading, with a Claude Pro/Max subscription token (from `claude setup-token`) or an API key, and picks the model (Opus 5.5, Sonnet 5.5 or Haiku 5.5). The token or key is stored encrypted and never shown again; Settings shows Connected and its last 4 characters, with Test connection and Disconnect.',
+      'Claude gets each page plus a sharper close-up of the title-block corner and the PDF\'s own text. When Claude is not connected, or a read fails (sign-in, usage limit), the naming screen says why and the pages keep their names; text and OCR naming work as before.',
+      'The separate GPU image (:cuda) is retired; the regular image does everything.',
+    ],
+  },
   {
     version: '4.7.0',
     date: 'October 29, 2026',
@@ -1135,44 +1144,6 @@ const PreferencesTab: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
 
-  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
-  const [autoName, setAutoName] = useState<boolean>(aiAutoNameEnabled());
-  const [aiIdleMinutes, setAiIdleMinutes] = useState<string>('5');
-  const [aiSettings, setAiSettings] = useState<Record<string, string> | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const tick = async () => {
-      const s = await getAiStatus(true);
-      if (cancelled) return;
-      setAiStatus(s);
-      // While the model is downloading/loading, keep polling so the page flips
-      // to "ready" on its own without a manual refresh.
-      if (s.state === 'loading') timer = setTimeout(tick, 5000);
-    };
-    tick();
-    // Load the idle-timeout setting
-    getSettings().then(s => {
-      if (cancelled) return;
-      setAiSettings(s);
-      if (s['aiIdleTimeoutMinutes'] !== undefined) setAiIdleMinutes(s['aiIdleTimeoutMinutes']);
-    }).catch(() => {});
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, []);
-
-  const handleAiIdleBlur = async () => {
-    const val = aiIdleMinutes.trim();
-    const num = parseFloat(val);
-    const safe = isNaN(num) || num < 0 ? '5' : String(num);
-    setAiIdleMinutes(safe);
-    try {
-      await saveSettings({ ...(aiSettings ?? {}), aiIdleTimeoutMinutes: safe });
-      setAiSettings(prev => ({ ...(prev ?? {}), aiIdleTimeoutMinutes: safe }));
-    } catch (err: any) {
-      toast(err?.message?.includes('admin') || err?.message?.includes('403') ? 'Only admins can change this.' : (err?.message ?? 'Failed to save.'), { type: 'error' });
-    }
-  };
-
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword.length < 6) {
@@ -1402,62 +1373,8 @@ const PreferencesTab: React.FC = () => {
         </div>
       </div>
 
-      {/* AI Sheet Reading */}
-      <div className="bg-raised rounded-2xl border border-edge shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-edge">
-          <h2 className="text-lg font-bold text-ink flex items-center gap-2">
-            <Sparkles size={18} /> AI Sheet Reading
-          </h2>
-          <p className="text-sm text-ink-soft mt-1">
-            {aiStatus?.state === 'ready'
-              ? `Local model ready: ${aiStatus.model} (${aiStatus.device}).`
-              : aiStatus?.state === 'loading'
-              ? 'Model is starting up — on first run it downloads the weights (this can take several minutes). Watch the container log for download progress. This will update automatically.'
-              : aiStatus?.state === 'idle'
-              ? `Local model idle: ${aiStatus.model} (${aiStatus.device}).`
-              : 'No local model detected. Page naming falls back to text/OCR extraction. See the ops runbook to enable it.'}
-          </p>
-        </div>
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-ink">Enable AI sheet reading</p>
-              <p className="text-xs text-ink-soft mt-0.5">
-                Renders page images for AI and shows the AI Scan button on the naming screen. Nothing runs until you click AI Scan.
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoName}
-              disabled={!aiStatus?.available}
-              onClick={() => { const next = !autoName; setAutoName(next); setAiAutoNameEnabled(next); }}
-              className={`relative shrink-0 w-12 h-6 rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-raised disabled:opacity-50 disabled:cursor-not-allowed ${autoName && aiStatus?.available ? 'bg-accent-600' : 'bg-edge-strong'}`}
-            >
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-all ${autoName && aiStatus?.available ? 'left-6' : 'left-0.5'}`} />
-            </button>
-          </div>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-ink">Unload model after (minutes idle)</p>
-              <p className="text-xs text-ink-soft mt-0.5">
-                Frees GPU memory when idle. 0 = keep loaded.
-              </p>
-            </div>
-            <div className="w-24 shrink-0">
-              <NumberInput allowEmpty
-                min="0"
-                step="1"
-                value={aiIdleMinutes}
-                onChange={e => setAiIdleMinutes(e.target.value)}
-                onBlur={handleAiIdleBlur}
-                disabled={!aiStatus?.available}
-                className="py-1.5"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* AI Sheet Reading (Claude) */}
+      <ClaudeAiCard isAdmin={isAdminUser} />
 
       {/* Phone notifications (ONLYOFFICE Phase 5) */}
       <PhoneNotifications />

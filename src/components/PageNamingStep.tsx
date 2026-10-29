@@ -8,7 +8,7 @@ import { buildOcrCrop, buildRegionCrop, ocrParamsFor, cleanSheetNumber, cleanDes
 import { reconcileExtract } from '../utils/extractMatch';
 import { findDuplicatePageNumbers, suffixPageNumber, composePageName } from '../utils/sheetNaming';
 import { getImageUrl } from '../utils/store';
-import { AiScanProgress, getAiStatus, warmupAi, getAiIdleTimeoutMs, transcribeRegion } from '../utils/aiSheets';
+import { AiScanProgress, getAiStatus, getLastAiError, transcribeRegion } from '../utils/aiSheets';
 import { PdfPagePreview } from './PdfPagePreview';
 import { useToast } from './Toast';
 
@@ -126,7 +126,7 @@ export interface NamingStepPage {
    *  change it via the per-row match dropdown. Only meaningful when the review
    *  UI is enabled (existingSheets provided). */
   matchSheetId?: string;
-  /** Confidence 0..1 from the local AI read, when the page was AI-named. Drives
+  /** Confidence 0..1 from the Claude read, when the page was AI-named. Drives
    *  the "AI" badge + tooltip in the review grid; absent for OCR/heuristic names. */
   aiConfidence?: number;
 }
@@ -161,7 +161,7 @@ export interface PageNamingStepProps {
   /** Plan set the incoming pages belong to — scopes the within-set duplicate
    *  check (the same page number across sets is a revision, not a duplicate). */
   planSetId?: string;
-  /** When provided, shows an "AI Scan" button that re-runs local AI reading on
+  /** When provided, shows an "AI Scan" button that re-runs Claude's reading on
    *  every page (used to invoke it manually, e.g. if the model wasn't ready at
    *  upload time). The parent owns the images/status and mutates pendingPages.
    *  The reporter callback receives loading/scanning/done progress updates. */
@@ -421,7 +421,6 @@ export const PageNamingStep: React.FC<PageNamingStepProps> = ({
       // Resolved once per extract run rather than per page — the setting is
       // static for the duration of the run, and "extract all" over dozens of
       // pages shouldn't pay a settings round-trip for each one.
-      const aiIdleTimeoutMs = extractEngine === 'ai' ? await getAiIdleTimeoutMs() : undefined;
 
       // Always gather BOTH raw text-layer candidates AND an OCR read, then
       // reconcile. Returns the cleaned value + a confidence flag for the row.
@@ -439,7 +438,6 @@ export const PageNamingStep: React.FC<PageNamingStepProps> = ({
             const result = await transcribeRegion({
               imageBase64: crop,
               mode: mode === 'pageNumber' ? 'number' : 'description',
-              idleTimeoutMs: aiIdleTimeoutMs,
             });
             if (!result) return { value: '', confidence: 'low', failed: true };
             const cleaned = cleanValue(result.text ?? '');
@@ -518,14 +516,14 @@ export const PageNamingStep: React.FC<PageNamingStepProps> = ({
         }
         setPendingPages(updated);
         if (failCount > 0) {
-          toast(`AI could not read ${failCount} of ${updated.length} page(s)`, {
+          toast(`Claude could not read ${failCount} of ${updated.length} page(s).${getLastAiError() ? ` ${getLastAiError()}` : ''}`, {
             type: failCount === updated.length ? 'error' : 'warning',
           });
         }
       } else {
         const result = await recognizePage(previewedPage);
         if (result.failed) {
-          toast('AI read failed — is the AI model available?', { type: 'error' });
+          toast(getLastAiError() || 'Claude could not read that region.', { type: 'error' });
         } else {
           updateField(previewPageId, mode, result.value);
           confidenceUpdates[previewPageId] = result.confidence;
@@ -658,7 +656,7 @@ export const PageNamingStep: React.FC<PageNamingStepProps> = ({
                       finally { setAiScanning(false); setAiScanProgress(null); }
                     }}
                     disabled={aiScanning || isConfirming}
-                    title="Read every page's number and description with the local AI"
+                    title="Claude reads every page's number and description"
                     className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-accent-700 dark:text-accent-300 bg-accent-50 dark:bg-accent-900/30 border border-accent-200 dark:border-accent-800 hover:bg-accent-100 dark:hover:bg-accent-900/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {aiScanning ? <><Loader2 size={18} className="animate-spin" /> Scanning…</> : <><Sparkles size={18} /> AI Scan</>}
@@ -668,8 +666,7 @@ export const PageNamingStep: React.FC<PageNamingStepProps> = ({
                       {aiScanProgress.phase === 'loading' ? (
                         <>
                           <Loader2 size={12} className="animate-spin shrink-0" />
-                          <span>Loading model…</span>
-                          <span className="text-ink-faint">(first run ~30s)</span>
+                          <span>Connecting to Claude…</span>
                         </>
                       ) : aiScanProgress.phase === 'scanning' && aiScanProgress.total !== undefined ? (
                         <>
@@ -937,8 +934,8 @@ export const PageNamingStep: React.FC<PageNamingStepProps> = ({
                 <button
                   type="button"
                   disabled={!aiEngineAvailable}
-                  title={aiEngineAvailable ? 'Read the selected region with the local AI model' : 'AI model not available on this server'}
-                  onClick={async () => { setExtractEngine('ai'); warmupAi(await getAiIdleTimeoutMs()); }}
+                  title={aiEngineAvailable ? 'Read the selected region with Claude' : 'Claude is not connected (an admin can connect it in Settings)'}
+                  onClick={() => setExtractEngine('ai')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                     extractEngine === 'ai'
                       ? 'bg-accent-600 text-white shadow-md'

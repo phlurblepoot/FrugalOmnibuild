@@ -1,21 +1,42 @@
 import type { SheetRead, SheetMatch, ExistingSheetRef, TranscribeMode, TranscribeResult } from './types';
 
-/** Pull the first balanced JSON object out of a string, tolerant of surrounding prose. */
+/** System prompt for every call: a strict, tool-less JSON reader. */
+export const SYSTEM_PROMPT =
+  'You read construction and architectural drawing sheets for a takeoff app. ' +
+  'Answer every request with exactly one JSON object and nothing else: no prose, no markdown code fences. ' +
+  'Report only what is printed on the drawing; never invent a sheet number or title.';
+
+/** Pull the first balanced JSON object out of a string. Braces inside JSON
+ *  strings don't count, and a ```json fence around the object is tolerated. */
 function extractJson(raw: string): any | null {
   const start = raw.indexOf('{');
   if (start < 0) return null;
   let depth = 0;
+  let inString = false;
   for (let i = start; i < raw.length; i++) {
-    if (raw[i] === '{') depth++;
-    else if (raw[i] === '}') {
+    const ch = raw[i];
+    if (inString) {
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
       depth--;
       if (depth === 0) {
-        try { return JSON.parse(raw.slice(start, i + 1)); } catch { return null; }
+        try {
+          const obj = JSON.parse(raw.slice(start, i + 1));
+          return obj && typeof obj === 'object' && !Array.isArray(obj) ? obj : null;
+        } catch { return null; }
       }
     }
   }
   return null;
 }
+
+/** A field the model must give as a string; anything else counts as missing. */
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 const clamp01 = (n: unknown): number => {
   const v = typeof n === 'number' && isFinite(n) ? n : 0;
@@ -24,10 +45,11 @@ const clamp01 = (n: unknown): number => {
 
 export function buildReadPrompt(embeddedText?: string): string {
   const hint = embeddedText && embeddedText.trim()
-    ? `\n\nFor reference, here is text extracted from the drawing's PDF layer (may be noisy or incomplete). Prefer it when it agrees with what you see:\n"""${embeddedText.trim().slice(0, 2000)}"""`
+    ? `\n\nFor reference, here is text extracted from the drawing's PDF layer (may be noisy or incomplete). Prefer it when it agrees with what you see:\n"""${embeddedText.trim().slice(0, 4000)}"""`
     : '';
   return (
-    `You are reading ONE sheet from a set of construction/architectural drawings. Extract:\n` +
+    `You are reading ONE sheet from a set of construction/architectural drawings. Use the close-up of the title-block corner, ` +
+    `when there is one, to read small print exactly. Extract:\n` +
     `- sheetNumber: the sheet's identifier from the title block (the strip along the right or bottom edge that holds the sheet number), ` +
     `e.g. "A-201", "S1.1", "RC-A-106", "A-300". Read each character and digit carefully. ` +
     `Ignore project/record numbers, revision numbers, room tags, and round detail-callout bubbles.\n` +
@@ -51,9 +73,9 @@ export function buildReadPrompt(embeddedText?: string): string {
 export function parseReadResponse(raw: string): SheetRead {
   const obj = extractJson(raw);
   if (!obj) return { sheetNumber: '', sheetTitle: '', confidence: 0 };
-  const sheetNumber = String(obj.sheetNumber ?? '').trim().toUpperCase();
-  const sheetTitle = String(obj.sheetTitle ?? '').trim();
-  const discipline = obj.discipline ? String(obj.discipline).trim() : undefined;
+  const sheetNumber = str(obj.sheetNumber).toUpperCase();
+  const sheetTitle = str(obj.sheetTitle);
+  const discipline = str(obj.discipline) || undefined;
   return { sheetNumber, sheetTitle, discipline, confidence: clamp01(obj.confidence) };
 }
 
@@ -73,9 +95,9 @@ export function buildMatchPrompt(page: SheetRead, existing: ExistingSheetRef[]):
 export function parseMatchResponse(raw: string, validIds: string[]): SheetMatch {
   const obj = extractJson(raw);
   if (!obj) return { matchSheetId: null, confidence: 0, reason: undefined };
-  const id = String(obj.matchSheetId ?? '').trim();
+  const id = str(obj.matchSheetId);
   const matchSheetId = validIds.includes(id) ? id : null;
-  const reason = obj.reason ? String(obj.reason).trim().slice(0, 200) : undefined;
+  const reason = str(obj.reason).slice(0, 200) || undefined;
   return { matchSheetId, confidence: clamp01(obj.confidence), reason };
 }
 
@@ -98,5 +120,5 @@ export function parseTranscribeResponse(raw: string): TranscribeResult {
   const obj = extractJson(raw);
   if (!obj) return { text: '', confidence: 0 };
   // No uppercasing here — the client applies the same cleaners as the OCR path.
-  return { text: String(obj.text ?? '').trim(), confidence: clamp01(obj.confidence) };
+  return { text: str(obj.text), confidence: clamp01(obj.confidence) };
 }

@@ -19,13 +19,10 @@ vi.mock('../components/Toast', async orig => ({
   ...(await orig<typeof import('../components/Toast')>()),
   useToast: () => ({ toast: h.toast }),
 }));
-// PreferencesTab (the default tab) polls the local AI status on mount; stub it
-// so an unrelated tab does not put the network in the middle of these tests.
-vi.mock('../utils/aiSheets', () => ({
-  getAiStatus: vi.fn().mockResolvedValue({ state: 'idle' }),
-  aiAutoNameEnabled: () => false,
-  setAiAutoNameEnabled: vi.fn(),
-}));
+// PreferencesTab (the default tab) shows the Claude card, which polls the AI
+// status on mount; stub it so an unrelated tab does not put the network in the
+// middle of these tests. Its own behaviour is covered by ClaudeAiCard.test.tsx.
+vi.mock('./settings/ClaudeAiCard', () => ({ ClaudeAiCard: () => null }));
 // The tab's own behaviour is covered by MailAccountsTab.test.tsx.
 vi.mock('./settings/MailAccountsTab', () => ({
   MailAccountsTab: ({ isAdmin }: { isAdmin?: boolean }) => (

@@ -9,7 +9,7 @@ import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { UploadFailuresModal, UploadFailure } from '../components/UploadFailuresModal';
 import { PageNamingStep } from '../components/PageNamingStep';
 import { AddFilesButton } from '../components/documents/AddFilesButton';
-import { readSheet, runWithConcurrency, applyReadToPage, aiAutoNameEnabled, warmupAi, getAiIdleTimeoutMs, waitForAiReady, type AiScanProgress } from '../utils/aiSheets';
+import { readSheet, runWithConcurrency, applyReadToPage, aiAutoNameEnabled, aiScanBlocker, aiScanSummary, type AiPageImages, type AiScanProgress } from '../utils/aiSheets';
 import { composePageName } from '../utils/sheetNaming';
 import { useToast } from '../components/Toast';
 
@@ -56,16 +56,14 @@ export const NewProject: React.FC = () => {
   const [pageThumbnails, setPageThumbnails] = useState<Record<string, string>>({});
   // Transient medium-res per-page images for AI reading (kept so the manual
   // "AI Scan" button can re-run reads without re-rendering the PDF).
-  const [aiImages, setAiImages] = useState<Record<string, string>>({});
+  const [aiImages, setAiImages] = useState<Record<string, AiPageImages>>({});
 
-  // Manual "AI Scan" — load the model on demand, then read every page.
+  // Manual "AI Scan" — Claude reads every page.
   const handleAiScan = async (report: (p: AiScanProgress) => void) => {
     report({ phase: 'loading' });
-    const idleMs = await getAiIdleTimeoutMs();
-    await warmupAi(idleMs);
-    const ready = await waitForAiReady(() => report({ phase: 'loading' }));
-    if (!ready) {
-      toast('AI model unavailable.', { type: 'error' });
+    const blocker = await aiScanBlocker();
+    if (blocker) {
+      toast(blocker, { type: 'error' });
       return;
     }
     const pages = pendingPages;
@@ -75,9 +73,9 @@ export const NewProject: React.FC = () => {
       pages.map(pg => async () => {
         const result = await readSheet({
           imageId: aiImages[pg.id] ? undefined : (pg.imageId || undefined),
-          imageBase64: aiImages[pg.id] || (pg.imageId ? undefined : pageThumbnails[pg.thumbnailId]),
+          imageBase64: aiImages[pg.id]?.page || (pg.imageId ? undefined : pageThumbnails[pg.thumbnailId]),
+          titleBlockBase64: aiImages[pg.id]?.titleBlock,
           embeddedText: pg.extractedText,
-          idleTimeoutMs: idleMs,
         });
         count++;
         report({ phase: 'scanning', done: count, total: pages.length });
@@ -86,8 +84,8 @@ export const NewProject: React.FC = () => {
       3,
     );
     setPendingPages(pages.map((pg, i) => (reads[i] ? applyReadToPage(pg, reads[i]!) : pg)));
-    const hits = reads.filter(Boolean).length;
-    toast(`AI read ${hits} of ${pages.length} page${pages.length === 1 ? '' : 's'}.`, { type: hits ? 'success' : 'error' });
+    const summary = aiScanSummary(reads.filter(Boolean).length, pages.length);
+    toast(summary.message, { type: summary.type });
     report({ phase: 'done' });
   };
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -225,8 +223,8 @@ export const NewProject: React.FC = () => {
       const extractedPages: PendingPage[] = [];
       const thumbnails: Record<string, string> = {};
       // Transient per-page medium-res images for AI reading (not stored). Only
-      // rendered when the local model is available + auto-naming is on.
-      const aiImages: Record<string, string> = {};
+      // rendered when AI sheet reading is on.
+      const aiImages: Record<string, AiPageImages> = {};
       // Render the AI image whenever auto-naming is on (independent of whether
       // the model is up right now) so the manual "AI Scan" button always has a
       // good image to send later. The auto pass additionally requires readiness.
@@ -322,7 +320,7 @@ export const NewProject: React.FC = () => {
               };
 
               extractedPages.push(newPage);
-              if (pageData.aiImageDataUrl) aiImages[newPage.id] = pageData.aiImageDataUrl;
+              if (pageData.aiImageDataUrl) aiImages[newPage.id] = { page: pageData.aiImageDataUrl, titleBlock: pageData.aiTitleBlockDataUrl || undefined };
 
               project.pages.push({
                 id: newPage.id,

@@ -2,10 +2,12 @@ FROM node:22-bookworm-slim
 
 # Install build dependencies for native modules (better-sqlite3, etc.)
 # python3-setuptools provides distutils which node-gyp requires
+# ca-certificates: the Claude Code binary (AI sheet reading) talks HTTPS to Anthropic
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-setuptools \
     build-essential \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,14 +24,15 @@ COPY . .
 # Build the frontend
 RUN npm run build
 
-# --- Local AI (sheet reading) ----------------------------------------------
-# This CPU image does NOT bundle the llama.cpp server, so the AI sheet-reading
-# feature stays disabled here and page naming falls back to OCR. For GPU
-# inference build the CUDA image instead: `Dockerfile.cuda` (see
-# docs/ai-sheet-reading-runbook.md). The /models volume + AI_MODELS_DIR are
-# declared for parity so the same compose/template works for both images.
-ENV AI_MODELS_DIR=/models
-VOLUME ["/models"]
+# --- AI sheet reading (Claude) -----------------------------------------------
+# The Claude Agent SDK (installed by npm ci above) brings its own Claude Code
+# binary for this platform. Put it on PATH so an admin can run
+# `docker exec -it <container> claude setup-token` (or `claude login`) on the
+# server. Its sign-in and settings live on the data volume, so they survive
+# image updates. See docs/ai-sheet-reading-runbook.md.
+RUN ln -s "$(ls -d /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude | head -n1)" /usr/local/bin/claude \
+    && claude --version
+ENV CLAUDE_CONFIG_DIR=/app/data/claude
 
 # Set environment variables
 ENV NODE_ENV=production

@@ -75,11 +75,14 @@ export interface PdfPageImage {
   height: number;
   pageNum: number;
   extractedText?: string;
-  /** Medium-resolution JPEG (~1600px long side) for local AI sheet reading.
-   *  Only produced when the caller opts in via includeAiImage; transient (not
-   *  stored) — the 400px thumbnail is too low-res for the model to read a title
-   *  block, so this is sent to /api/ai/read-sheet instead. */
+  /** Medium-resolution JPEG (1568px long side, the most Claude looks at) for
+   *  AI sheet reading. Only produced when the caller opts in via
+   *  includeAiImage; transient (not stored) — the 400px thumbnail is too
+   *  low-res to read a title block, so this is sent to /api/ai/read-sheet. */
   aiImageDataUrl?: string;
+  /** A sharper JPEG of the bottom-right corner (right 40% × bottom 40%), where
+   *  the sheet number and title usually are; sent alongside aiImageDataUrl. */
+  aiTitleBlockDataUrl?: string;
   /** Populated when this page could not be rendered. dataUrl will be empty. */
   error?: string;
 }
@@ -237,10 +240,15 @@ export function cleanDescriptionText(raw: string): string {
 export interface LoadPdfPagesOptions {
   /** When true, also rasterize each page to a JPEG dataUrl (legacy path). Defaults to false. */
   includeFullPageRaster?: boolean;
-  /** When true, also produce a ~1600px `aiImageDataUrl` per page for local AI
-   *  sheet reading. Defaults to false (skips the extra render when AI is off). */
+  /** When true, also produce `aiImageDataUrl` + `aiTitleBlockDataUrl` per page
+   *  for AI sheet reading. Defaults to false (skips the extra renders when AI is off). */
   includeAiImage?: boolean;
 }
+
+/** Claude scales images down to about this long edge, so larger is wasted. */
+const AI_IMAGE_LONG_EDGE = 1568;
+/** The title-block crop: this fraction of the width and height, bottom-right. */
+const TITLE_BLOCK_FRACTION = 0.4;
 
 export const loadPdfPagesGenerator = async function*(
   file: File,
@@ -348,27 +356,34 @@ export const loadPdfPagesGenerator = async function*(
     const dataUrl = includeFullPageRaster ? canvas.toDataURL('image/jpeg', 0.6) : '';
     const thumbnailDataUrl = thumbCanvas.toDataURL('image/jpeg', 0.5);
 
-    // Medium-res image for local AI reading (the 400px thumbnail can't resolve a
-    // title block). Rendered directly at AI scale for vector pages, or downscaled
-    // from the already-rendered full canvas when we have one.
+    // Medium-res images for AI reading (the 400px thumbnail can't resolve a
+    // title block): the whole sheet, plus the title-block corner at about 2.5×
+    // the detail. Rendered directly at AI scale for vector pages, or cut from
+    // the already-rendered full canvas when we have one.
     let aiImageDataUrl = '';
+    let aiTitleBlockDataUrl = '';
     if (includeAiImage) {
-      const aiScale = Math.min(1, 1600 / Math.max(viewport.width, viewport.height));
-      const aiCanvas = document.createElement('canvas');
-      aiCanvas.width = Math.round(viewport.width * aiScale);
-      aiCanvas.height = Math.round(viewport.height * aiScale);
-      const aiCtx = aiCanvas.getContext('2d');
-      if (aiCtx) {
+      const renderAiImage = async (x: number, y: number, w: number, h: number): Promise<string> => {
+        const s = Math.min(1, AI_IMAGE_LONG_EDGE / Math.max(w, h));
+        const aiCanvas = document.createElement('canvas');
+        aiCanvas.width = Math.round(w * s);
+        aiCanvas.height = Math.round(h * s);
+        const aiCtx = aiCanvas.getContext('2d');
+        if (!aiCtx) return '';
         aiCtx.fillStyle = 'white';
         aiCtx.fillRect(0, 0, aiCanvas.width, aiCanvas.height);
         if (needsFullRender) {
-          aiCtx.drawImage(canvas, 0, 0, aiCanvas.width, aiCanvas.height);
+          aiCtx.drawImage(canvas, x, y, w, h, 0, 0, aiCanvas.width, aiCanvas.height);
         } else {
-          const aiVp = page.getViewport({ scale: scale * aiScale });
-          await page.render({ canvasContext: aiCtx, viewport: aiVp, intent: 'print' } as any).promise;
+          const aiVp = page.getViewport({ scale: scale * s });
+          await page.render({ canvasContext: aiCtx, viewport: aiVp, transform: [1, 0, 0, 1, -x * s, -y * s], intent: 'print' } as any).promise;
         }
-        aiImageDataUrl = aiCanvas.toDataURL('image/jpeg', 0.72);
-      }
+        return aiCanvas.toDataURL('image/jpeg', 0.72);
+      };
+      aiImageDataUrl = await renderAiImage(0, 0, viewport.width, viewport.height);
+      const tbW = viewport.width * TITLE_BLOCK_FRACTION;
+      const tbH = viewport.height * TITLE_BLOCK_FRACTION;
+      aiTitleBlockDataUrl = await renderAiImage(viewport.width - tbW, viewport.height - tbH, tbW, tbH);
     }
 
     page.cleanup();
@@ -377,6 +392,7 @@ export const loadPdfPagesGenerator = async function*(
       dataUrl,
       thumbnailDataUrl,
       aiImageDataUrl,
+      aiTitleBlockDataUrl,
       width: viewport.width,
       height: viewport.height,
       pageNum: i,

@@ -1,5 +1,5 @@
-// Serializes async tasks so only one runs at a time (one GPU context), with a
-// per-task timeout. A slow/failed task never wedges the queue.
+// Serializes async tasks so only one runs at a time (one Claude call at a time, so a
+// big plan set does not trip rate limits), with a per-task timeout. A slow/failed task never wedges the queue.
 
 export interface SingleFlightQueue {
   enqueue<T>(fn: () => Promise<T>): Promise<T>;

@@ -64,8 +64,8 @@ value.
   container, and production once 4.0.0 reaches `main`. (During the project the
   test container ran the `:onlyoffice` tag, which no longer updates; switch it
   back to `:testing`.)
-  Image tags: `:main` (stable), `:testing` (latest testing build), `:cuda-stable`
-  and `:cuda` (the GPU images that track `main` and `testing`).
+  Image tags: `:main` (stable) and `:testing` (latest testing build). The old
+  `:cuda` and `:cuda-stable` GPU images are retired; use `:testing` or `:main`.
 
 ---
 

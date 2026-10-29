@@ -8,7 +8,7 @@ import { calculateTakeoffTotalCost, evaluateMathExpression } from '../utils/math
 import { buildTakeoffExcelRows } from './project/takeoffExcel';
 import { loadPdfPagesGenerator } from '../utils/pdf';
 import { computeRevisionModel, orderedPlanSets, summarizePlanSet, effectiveSheetId, carryForwardFrom } from '../utils/planSets';
-import { readSheet, matchSheet, runWithConcurrency, applyReadToPage, applyMatchToPage, aiAutoNameEnabled, warmupAi, getAiIdleTimeoutMs, waitForAiReady, type AiScanProgress } from '../utils/aiSheets';
+import { readSheet, matchSheet, runWithConcurrency, applyReadToPage, applyMatchToPage, aiAutoNameEnabled, aiScanBlocker, aiScanSummary, type AiPageImages, type AiScanProgress } from '../utils/aiSheets';
 import { composePageName, nextPlaceholderStart } from '../utils/sheetNaming';
 import { PlanSetManager } from '../components/PlanSetManager';
 import { PlanSetRevisions } from '../components/PlanSetRevisions';
@@ -260,7 +260,7 @@ export const ProjectView: React.FC = () => {
   const [pendingThumbnails, setPendingThumbnails] = useState<Record<string, string>>({});
   // Medium-res per-page images for AI reading, kept so the manual "AI Scan"
   // button can re-run reads without re-rendering the PDF.
-  const [aiImages, setAiImages] = useState<Record<string, string>>({});
+  const [aiImages, setAiImages] = useState<Record<string, AiPageImages>>({});
   const [newPlanSetName, setNewPlanSetName] = useState('');
   const [newPlanSetDate, setNewPlanSetDate] = useState(new Date().toISOString().split('T')[0]);
   const [newPlanSetFiles, setNewPlanSetFiles] = useState<File[]>([]);
@@ -698,7 +698,7 @@ export const ProjectView: React.FC = () => {
       const extractedPages: any[] = [];
       const thumbnails: Record<string, string> = {};
       // Transient per-page medium-res images for AI reading (not stored).
-      const aiImages: Record<string, string> = {};
+      const aiImages: Record<string, AiPageImages> = {};
       // Render the AI image whenever auto-naming is on so the manual "AI Scan"
       // button always has a good image; the auto pass also requires readiness.
       const aiWanted = aiAutoNameEnabled();
@@ -795,7 +795,7 @@ export const ProjectView: React.FC = () => {
               };
 
               extractedPages.push(newPage);
-              if (pageData.aiImageDataUrl) aiImages[newPage.id] = pageData.aiImageDataUrl;
+              if (pageData.aiImageDataUrl) aiImages[newPage.id] = { page: pageData.aiImageDataUrl, titleBlock: pageData.aiTitleBlockDataUrl || undefined };
 
               const newProjectPage = {
                 id: newPage.id,
@@ -1304,14 +1304,12 @@ export const ProjectView: React.FC = () => {
     setShowAddPagesModal(true);
   };
 
-  // Manual "AI Scan" — load the model on demand, read every page, then match.
+  // Manual "AI Scan" — Claude reads every page, then matches them to existing sheets.
   const handleAiScan = async (report: (p: AiScanProgress) => void) => {
     report({ phase: 'loading' });
-    const idleMs = await getAiIdleTimeoutMs();
-    await warmupAi(idleMs);
-    const ready = await waitForAiReady(() => report({ phase: 'loading' }));
-    if (!ready) {
-      toast('AI model unavailable.', { type: 'error' });
+    const blocker = await aiScanBlocker();
+    if (blocker) {
+      toast(blocker, { type: 'error' });
       return;
     }
     const pages = pendingPages;
@@ -1321,9 +1319,9 @@ export const ProjectView: React.FC = () => {
       pages.map(pg => async () => {
         const result = await readSheet({
           imageId: aiImages[pg.id] ? undefined : (pg.imageId || undefined),
-          imageBase64: aiImages[pg.id] || (pg.imageId ? undefined : pendingThumbnails[pg.thumbnailId]),
+          imageBase64: aiImages[pg.id]?.page || (pg.imageId ? undefined : pendingThumbnails[pg.thumbnailId]),
+          titleBlockBase64: aiImages[pg.id]?.titleBlock,
           embeddedText: pg.extractedText,
-          idleTimeoutMs: idleMs,
         });
         count++;
         report({ phase: 'scanning', done: count, total: pages.length });
@@ -1346,7 +1344,7 @@ export const ProjectView: React.FC = () => {
           named.map((_pg, i) => async () => {
             const read = reads[i];
             if (!read || (!read.sheetNumber && !read.sheetTitle)) return null;
-            return matchSheet({ page: read, existingSheets: existingRefs, idleTimeoutMs: idleMs });
+            return matchSheet({ page: read, existingSheets: existingRefs });
           }),
           3,
         );
@@ -1354,8 +1352,8 @@ export const ProjectView: React.FC = () => {
       }
     }
     setPendingPages(named);
-    const hits = reads.filter(Boolean).length;
-    toast(`AI read ${hits} of ${pages.length} page${pages.length === 1 ? '' : 's'}.`, { type: hits ? 'success' : 'error' });
+    const summary = aiScanSummary(reads.filter(Boolean).length, pages.length);
+    toast(summary.message, { type: summary.type });
     report({ phase: 'done' });
   };
 
