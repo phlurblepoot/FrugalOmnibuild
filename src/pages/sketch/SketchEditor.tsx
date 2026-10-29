@@ -10,7 +10,7 @@ import { Link, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ArrowLeft, ArrowUpFromLine, Box, Circle, Combine, Eye, EyeOff, FlipHorizontal2, ListOrdered, LoaderCircle, Magnet, Maximize,
-  MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, Trash2, TriangleRight, Undo2,
+  ImagePlus, MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, Trash2, TriangleRight, Undo2,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
@@ -21,7 +21,7 @@ import { fetchFileBlob, getFileMeta, getProjectSummary, saveFileVersion, type Pr
 import {
   PLANE_LABELS, SKETCH_MIME, axisClearOfShape, canPull, faceFrame, formatLength, frameOf, isShapeFeature, parseLength,
   parseSketch, planSolids, pullAtPoint, removeFeature, removeShape, samePlane, samePlaneSurface, serializeSketch,
-  setPullDistance, shapeOutline, shapeSnapPoints, stepOfSolid, toPlane, toWorld, transformMatrix, usedShapeIds,
+  scaleReference, setPullDistance, shapeOutline, shapeSnapPoints, stepOfSolid, toPlane, toWorld, transformMatrix, usedShapeIds,
   type PlaneId, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Transform,
   type Vec2, type Vec3,
 } from './sketchModel';
@@ -37,6 +37,9 @@ import { buildSolids } from './geometryClient';
 import type { SolidMesh } from './geometryTypes';
 import { sketchTitle } from './sketchNames';
 import { SketchSteps } from './SketchSteps';
+import { SketchRefs } from './SketchRefs';
+import { loadReferenceImage, type ReferenceImage } from './referenceImage';
+import { FilePickerModal } from '../../components/FilePickerModal';
 
 // The mobile top bar sits above every page on phones (AppShell); the editor
 // fills whatever is left — the same rule as the document editor.
@@ -120,13 +123,13 @@ const useDark = () => {
   return dark;
 };
 
-type Selection = { shapeId: string } | { featureId: string } | null;
+type Selection = { shapeId: string } | { featureId: string } | { refId: string } | null;
 
 /** What the pointer picked, as a selection: a solid resolves to the pull that made the face that was hit
  *  (or, failing that, the step that made the solid). */
 const selectionOf = (doc: SketchDoc, picked: Pick): Selection => {
   if (!picked) return null;
-  if ('shapeId' in picked) return picked;
+  if ('shapeId' in picked || 'refId' in picked) return picked;
   return { featureId: pullAtPoint(doc, picked.solid.pullIds, picked.solid.point) ?? stepOfSolid(picked.solid.solidId) };
 };
 
@@ -224,6 +227,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const [combineMode, setCombineMode] = useState<'join' | 'cut'>('join');
   const [copiesText, setCopiesText] = useState('0');
   const [mirrorKeep, setMirrorKeep] = useState(true);
+  const [photoPicker, setPhotoPicker] = useState(false);
   // The step list starts open on wide screens.
   const [showSteps, setShowSteps] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
   const [lockAngles, setLockAngles] = useState(false);
@@ -238,6 +242,21 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   // ── Solids ────────────────────────────────────────────────────────────────
   const [solids, setSolids] = useState<SolidMesh[]>([]);
   const plan = useMemo(() => (doc ? planSolids(doc) : EMPTY_PLAN), [doc]);
+
+  // Reference photos' pictures, loaded as their files are needed.
+  const [refImages, setRefImages] = useState<Map<string, ReferenceImage>>(() => new Map());
+  const refFileIds = useMemo(() => [...new Set((doc?.refs ?? []).map(r => r.fileId))].join(','), [doc]);
+  useEffect(() => {
+    let live = true;
+    for (const fid of refFileIds ? refFileIds.split(',') : []) {
+      if (refImages.has(fid)) continue;
+      loadReferenceImage(fid)
+        .then(img => { if (live) setRefImages(prev => new Map(prev).set(fid, img)); })
+        .catch(() => { if (live) toast('A reference photo could not be loaded.', { type: 'warning' }); });
+    }
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refFileIds]);
   const [engine, setEngine] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [buildErrors, setBuildErrors] = useState<string[]>([]);
   const buildSeq = useRef(0);
@@ -273,7 +292,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (!scene || !doc) return;
     scene.setUnits(doc.units);
     scene.setContent({
-      doc, plan, solids, showDims,
+      doc, plan, solids, showDims, refImages,
+      selectedRefId: selection && 'refId' in selection ? selection.refId : null,
       // The solid a Join/Cut, Move, Rotate or Mirror is working on.
       activeSolidId: draft?.tool === 'combine' ? draft.targetId
         : draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror' ? draft.solidId : null,
@@ -285,13 +305,14 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       fitted.current = true;
       scene.fit(doc, solids);
     }
-  }, [doc, plan, solids, selection, showDims, draft]);
+  }, [doc, plan, solids, selection, showDims, draft, refImages]);
   useEffect(() => { sceneRef.current?.setWorkPlane(plane); }, [plane]);
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull') || draft?.tool === 'spin'
-      || draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror');
+      || draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror'
+      || draft?.tool === 'photo-scale' || draft?.tool === 'photo-move');
     scene.setNavigation(drawing ? 'draw' : 'navigate');
   }, [tool, draft, view, editable, facePick]);
 
@@ -534,6 +555,21 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       });
       return;
     }
+    if (draft?.tool === 'photo-scale' || draft?.tool === 'photo-move') {
+      const raw = ptr ? scene.planePoint(ptr.x, ptr.y, plane) : null;
+      if (raw) hover.current = raw;
+      const base = draft.tool === 'photo-scale' ? draft.a : draft.from;
+      const end = draft.tool === 'photo-scale' && draft.b ? draft.b : raw;
+      const snap = raw ? { p: raw, plane, kind: 'free' as const } : null;
+      if (!base || !end) { scene.setPreview({ ...none, snap }); return; }
+      const len = Math.hypot(end.x - base.x, end.y - base.y);
+      scene.setPreview({
+        ...none, snap,
+        line: { plane, a: base, b: end },
+        readout: { at: toWorld(plane, end), text: draft.tool === 'photo-scale' ? `now ${formatLength(len, units)}` : formatLength(len, units) },
+      });
+      return;
+    }
     if (draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror') {
       const snapped = ptr ? snappedAt(ptr.x, ptr.y) : null;
       if (snapped) hover.current = snapped.p;
@@ -632,6 +668,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const startPull = (picked: Selection) => {
     if (!doc || !picked) return;
     const pulled = usedShapeIds(doc);
+    if ('refId' in picked) return;
     if ('featureId' in picked) {
       const f = doc.features.find(ff => ff.id === picked.featureId);
       if (!f) return;
@@ -652,7 +689,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   /** The closed, unused shape a Spin or Run starts from, or a message saying why not. */
   const profileFrom = (picked: Selection): SketchShape | string => {
     if (!doc || !picked) return 'Click a closed shape.';
-    if ('featureId' in picked) return 'Click a shape (an outline), not a solid.';
+    if (!('shapeId' in picked)) return 'Click a shape (an outline), not a solid or photo.';
     const shape = doc.shapes.find(s => s.id === picked.shapeId);
     if (!shape || usedShapeIds(doc).has(shape.id)) return 'Click a closed shape.';
     if (!canPull(shape)) return 'Only a closed shape can be used. Close it by ending on its first point.';
@@ -734,10 +771,65 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     setSelection(null);
   };
 
+  /** Lays a picked picture on the plane being drawn on, in the middle of the view, filling most of it. */
+  const addReference = async (row: { id: string; name: string }) => {
+    const scene = sceneRef.current;
+    if (!doc || !scene) return;
+    try {
+      const img = await loadReferenceImage(row.id);
+      setRefImages(prev => new Map(prev).set(row.id, img));
+      const { center, width } = scene.viewOn(plane);
+      const ref = {
+        id: uuidv4(), fileId: row.id, name: row.name, plane, center, width: width * 0.6,
+        aspect: img.height / Math.max(1, img.width), rotation: 0, opacity: 0.6,
+      };
+      commitDoc({ ...doc, refs: [...doc.refs, ref] });
+      setSelection({ refId: ref.id });
+      setShowSteps(true);
+      toast('Photo added. Use Set scale with a length you know so it measures true.', { type: 'success' });
+    } catch {
+      toast('That picture could not be opened.', { type: 'error' });
+    }
+  };
+
+  /** Set scale or Move on a reference photo: looking straight at its plane, clicks land on it. */
+  const startPhotoDraft = (kind: 'photo-scale' | 'photo-move', refId: string) => {
+    const ref = doc?.refs.find(r => r.id === refId);
+    if (!ref) return;
+    setToolState('select');
+    setTyped(['', '']);
+    setWork({ plane: ref.plane });
+    sceneRef.current?.setWorkPlane(ref.plane);
+    if (!sceneRef.current?.facesPlane(ref.plane)) setView(viewForPlane(ref.plane));
+    setSelection({ refId });
+    setDraft(kind === 'photo-scale' ? { tool: 'photo-scale', refId } : { tool: 'photo-move', refId });
+  };
+
+  const updateRef = (refId: string, change: (r: SketchDoc['refs'][number]) => SketchDoc['refs'][number]) => {
+    if (!doc) return;
+    commitDoc({ ...doc, refs: doc.refs.map(r => (r.id === refId ? change(r) : r)) });
+  };
+
   const handleClick = (clientX: number, clientY: number) => {
     const scene = sceneRef.current;
     if (!scene || !doc) return;
     if (editable && facePick) { pickFace(clientX, clientY); return; }
+    if (editable && (draft?.tool === 'photo-scale' || draft?.tool === 'photo-move')) {
+      // Points on the photo itself, not snapped to the grid.
+      const p = scene.planePoint(clientX, clientY, plane);
+      if (!p) return;
+      if (draft.tool === 'photo-scale') {
+        if (!draft.a) setDraft({ ...draft, a: p });
+        else if (!draft.b) { setDraft({ ...draft, b: p }); requestAnimationFrame(() => typedRef.current?.focus()); }
+      } else if (!draft.from) {
+        setDraft({ ...draft, from: p });
+      } else {
+        const by = { x: p.x - draft.from.x, y: p.y - draft.from.y };
+        updateRef(draft.refId, r => ({ ...r, center: { x: r.center.x + by.x, y: r.center.y + by.y } }));
+        setDraft(null);
+      }
+      return;
+    }
     if (!editable || tool === 'select') {
       setSelection(selectionOf(doc, scene.pick(clientX, clientY)));
       return;
@@ -828,6 +920,13 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     } else if (d?.tool === 'spin') {
       if (!d.a || !hover.current) return toast('Click two points on the axis to spin round.', { type: 'info' });
       commitSpin(d, hover.current);
+    } else if (d?.tool === 'photo-scale') {
+      const len = parseLength(a, units);
+      if (!d.a || !d.b || len === null || len <= 0) return bad('length');
+      updateRef(d.refId, r => scaleReference(r, d.a!, d.b!, len));
+      setDraft(null);
+      setTyped(['', '']);
+      toast(`Scaled: that length is now ${formatLength(len, units)}.`, { type: 'success' });
     } else if (d?.tool === 'move' || d?.tool === 'rotate') {
       if (d.tool === 'rotate' && typed[0].trim() && parseAngle(typed[0]) === null) return toast('Type the angle in degrees, e.g. 90.', { type: 'warning' });
       const t = draftTransform(d, hover.current);
@@ -844,6 +943,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       // A solid made from a shape goes with its shape (and whatever was drawn on its faces);
       // a join, cut, move or copy is undone by deleting its step.
       commitDoc(isShapeFeature(f) ? removeShape(doc, f.shapeId) : removeFeature(doc, f.id));
+    } else if ('refId' in selection) {
+      // The photo comes off the sketch; its file stays in Documents.
+      commitDoc({ ...doc, refs: doc.refs.filter(r => r.id !== selection.refId) });
     } else {
       commitDoc(removeShape(doc, selection.shapeId));
     }
@@ -1029,6 +1131,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     : draft?.tool === 'spin' ? [{ label: 'Angle °', placeholder: '360' }]
     : draft?.tool === 'move' && draft.from ? [{ label: 'Length', placeholder: units === 'metric' ? '250' : `1' 4 1/2"` }, { label: 'Angle °', placeholder: 'from level' }]
     : draft?.tool === 'rotate' && draft.pivot ? [{ label: 'Angle °', placeholder: '90' }]
+    : draft?.tool === 'photo-scale' && draft.b ? [{ label: 'Real length', placeholder: units === 'metric' ? '600' : `2' 6"` }]
     : [];
   const draftHint = draft?.tool === 'spin' ? (draft.a ? 'Click the second point of the axis.' : 'Click the first point of the line to spin round.')
     : draft?.tool === 'run' ? 'Now click the path to run it along.'
@@ -1036,6 +1139,8 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     : draft?.tool === 'move' ? (draft.from ? 'Click where it goes, or type how far.' : 'Click the point to move it from.')
     : draft?.tool === 'rotate' ? (draft.pivot ? 'Click or type the angle (counter-clockwise).' : 'Click the point to turn it round.')
     : draft?.tool === 'mirror' ? (draft.a ? 'Click the second point of the mirror line.' : 'Click the first point of the mirror line.')
+    : draft?.tool === 'photo-scale' ? (draft.b ? 'How long is that really?' : draft.a ? 'Click the other end of it.' : 'Click one end of a length you know on the photo (zoom in for accuracy).')
+    : draft?.tool === 'photo-move' ? (draft.from ? 'Click where that point should go.' : 'Click a point on the photo.')
     : null;
 
   const toolButton = (t: ToolId, label: string, icon: React.ReactNode, key: string) => (
@@ -1123,6 +1228,12 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             {toolButton('move', 'Move or copy', <Move size={18} />, 'M')}
             {toolButton('rotate', 'Rotate or copy round', <RotateCw size={18} />, 'T')}
             {toolButton('mirror', 'Mirror', <FlipHorizontal2 size={18} />, 'I')}
+            <div className="my-1 h-px w-8 bg-edge" />
+            <button type="button" data-testid="sketch-add-photo" onClick={() => setPhotoPicker(true)}
+              title="Add a reference photo, scan or print to trace over" aria-label="Add a reference photo"
+              className="flex size-10 items-center justify-center rounded-lg text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+              <ImagePlus size={18} />
+            </button>
             <div className="my-1 h-px w-8 bg-edge" />
             <button
               type="button"
@@ -1219,7 +1330,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
           </div>
 
           {showSteps && doc && (
-            <div className="pointer-events-none absolute bottom-20 right-3 top-14 flex flex-col items-end">
+            <div className="pointer-events-none absolute bottom-20 right-3 top-14 flex flex-col items-end gap-2">
               <SketchSteps
                 doc={doc}
                 plan={plan}
@@ -1230,8 +1341,31 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                 onClose={() => setShowSteps(false)}
                 onError={m => toast(m, { type: 'warning' })}
               />
+              <SketchRefs
+                refs={doc.refs}
+                units={doc.units}
+                selectedId={selection && 'refId' in selection ? selection.refId : null}
+                editable={editable}
+                onSelect={id => { setDraft(null); setSelection(id ? { refId: id } : null); }}
+                onUpdate={updateRef}
+                onRemove={id => { commitDoc({ ...doc, refs: doc.refs.filter(r => r.id !== id) }); setSelection(null); setDraft(null); }}
+                onScale={id => startPhotoDraft('photo-scale', id)}
+                onMove={id => startPhotoDraft('photo-move', id)}
+              />
             </div>
           )}
+
+          <FilePickerModal
+            open={photoPicker}
+            onClose={() => setPhotoPicker(false)}
+            title="Add a reference photo"
+            accept="image-pdf"
+            multi={false}
+            defaultTab="upload"
+            initialProjectIds={meta?.projectId ? [meta.projectId] : undefined}
+            upload={{ kind: 'sketch-photo', projectId: meta?.projectId ?? undefined, sourceType: 'sketch', sourceId: fileId }}
+            onPick={rows => { setPhotoPicker(false); if (rows[0]) void addReference(rows[0]); }}
+          />
 
           {(engine === 'loading' || !doc) && (
             <div className="pointer-events-none absolute left-1/2 top-16 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-edge bg-raised px-3 py-2 text-sm text-ink-soft shadow-sm">

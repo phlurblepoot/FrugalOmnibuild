@@ -9,11 +9,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {
-  arcPoints, circleThrough, cuttingPulls, formatLength, frameOf, recipePieces, shapeOutline, toWorld, usedShapeIds,
-  type RecipePiece, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Vec2, type Vec3,
+  arcPoints, circleThrough, cuttingPulls, formatLength, frameOf, recipePieces, referenceCorners, shapeOutline, toWorld,
+  usedShapeIds, type RecipePiece, type ReferencePhoto, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Vec2, type Vec3,
 } from './sketchModel';
 import { gridStep, majorEvery, type SnapKind } from './sketchSnap';
 import type { SolidMesh } from './geometryTypes';
+import type { ReferenceImage } from './referenceImage';
 
 /** 'plane' looks straight at the work plane (a face of a solid). */
 export type ViewName = 'top' | 'front' | 'side' | 'iso' | 'plane';
@@ -45,6 +46,9 @@ export interface SceneContent {
   /** A solid a tool is working on, shown as picked. */
   activeSolidId?: string | null;
   showDims: boolean;
+  /** Reference photos, the pictures loaded so far (by file id), and the one picked. */
+  refImages?: Map<string, ReferenceImage>;
+  selectedRefId?: string | null;
 }
 
 export interface ScenePreview {
@@ -81,7 +85,7 @@ export interface SolidHit {
   planar: boolean;
 }
 
-export type Pick = { shapeId: string } | { solid: SolidHit } | null;
+export type Pick = { shapeId: string } | { solid: SolidHit } | { refId: string } | null;
 
 interface Theme { background: number; line: number; selected: number; preview: number; gridMinor: number; gridMajor: number; solid: number; edge: number }
 const LIGHT: Theme = { background: 0xf8fafc, line: 0x1e293b, selected: 0x2563eb, preview: 0xc026d3, gridMinor: 0xe2e8f0, gridMajor: 0xcbd5e1, solid: 0xe7e5e4, edge: 0x334155 };
@@ -319,6 +323,13 @@ export class SketchScene {
     this.requestRender();
   }
 
+  /** Where the middle of the view meets a plane, and how wide the view is there (mm). */
+  viewOn(plane: SketchPlane): { center: Vec2; width: number } {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const center = this.planePoint(r.left + r.width / 2, r.top + r.height / 2, plane) ?? { x: 0, y: 0 };
+    return { center, width: (this.container.clientWidth || 1) / this.pxPerMm() };
+  }
+
   /** Screen pixels per world millimetre (at the point the view turns around). */
   pxPerMm(): number {
     return (this.container.clientHeight || 1) / this.visibleHeight();
@@ -366,8 +377,13 @@ export class SketchScene {
     this.rayAt(clientX, clientY);
     const px = this.pxPerMm();
     this.raycaster.params.Line = { threshold: 10 / px };
-    const hits = this.raycaster.intersectObjects(only === 'solids' ? this.pickables.filter(o => o.userData.solid) : this.pickables, false);
-    if (!hits.length) return null;
+    const all = this.raycaster.intersectObjects(only === 'solids' ? this.pickables.filter(o => o.userData.solid) : this.pickables, false);
+    // Reference photos only when nothing else is there: they lie behind the drawing.
+    const hits = all.filter(h => !h.object.userData.refId);
+    if (!hits.length) {
+      const photo = all.find(h => h.object.userData.refId);
+      return photo ? { refId: photo.object.userData.refId as string } : null;
+    }
     // Lines and fills before solids at the same depth: a sketch drawn on a face stays pickable.
     const reach = hits[0].distance + Math.max(0.5, 2 / px);
     const hit = hits.find(h => h.object.userData.shapeId && h.distance <= reach) ?? hits[0];
@@ -421,6 +437,7 @@ export class SketchScene {
     this.clear(this.content);
     this.pickables = [];
     this.units = c.doc.units;
+    this.addReferences(c.doc.refs, c.refImages, c.selectedRefId ?? null);
     const used = usedShapeIds(c.doc);
     const t = this.theme;
     const pieces = new Map<string, { piece: RecipePiece; cut: boolean }>();
@@ -491,6 +508,47 @@ export class SketchScene {
       }
     }
     this.requestRender();
+  }
+
+  // Each picture's texture, made once and kept while the picture is in use.
+  private textures = new Map<HTMLCanvasElement, THREE.CanvasTexture>();
+
+  /** Reference photos: see-through pictures on their planes, behind the grid, the drawing and the solids. */
+  private addReferences(refs: ReferencePhoto[], images: Map<string, ReferenceImage> | undefined, selectedId: string | null): void {
+    const inUse = new Set<HTMLCanvasElement>();
+    for (const r of refs) {
+      const img = images?.get(r.fileId);
+      if (r.hidden || !img) continue;
+      inUse.add(img.canvas);
+      let tex = this.textures.get(img.canvas);
+      if (!tex) {
+        tex = new THREE.CanvasTexture(img.canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 4;
+        this.textures.set(img.canvas, tex);
+      }
+      const geo = new THREE.PlaneGeometry(r.width, r.width * r.aspect);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        map: tex, transparent: true, opacity: r.opacity, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      }));
+      mesh.userData.sharedTexture = true;
+      mesh.applyMatrix4(new THREE.Matrix4().makeRotationZ((r.rotation * Math.PI) / 180).setPosition(r.center.x, r.center.y, 0));
+      mesh.applyMatrix4(planeMatrix(r.plane));
+      mesh.renderOrder = -5;
+      mesh.userData.refId = r.id;
+      this.content.add(mesh);
+      this.pickables.push(mesh);
+      if (r.id === selectedId) {
+        const corners = referenceCorners(r);
+        const outline = new THREE.Line(new THREE.BufferGeometry().setFromPoints([...corners, corners[0]].map(p => v3(toWorld(r.plane, p)))),
+          new THREE.LineBasicMaterial({ color: this.theme.selected, depthTest: false }));
+        outline.renderOrder = 2;
+        this.content.add(outline);
+      }
+    }
+    for (const [canvas, tex] of this.textures) {
+      if (!inUse.has(canvas)) { tex.dispose(); this.textures.delete(canvas); }
+    }
   }
 
   /** The measurements of one piece of a solid: its profile, and how far it was pulled, spun or run. */
@@ -763,6 +821,7 @@ export class SketchScene {
         const m = c as THREE.Mesh;
         if (!c.userData.sharedGeometry) m.geometry?.dispose?.();
         const mat = m.material as THREE.Material | THREE.Material[] | undefined;
+        // A reference photo's texture is kept (see addReferences); only its material goes.
         if (Array.isArray(mat)) mat.forEach(x => x.dispose()); else mat?.dispose?.();
         if (c instanceof CSS2DObject) c.element.remove();
       });

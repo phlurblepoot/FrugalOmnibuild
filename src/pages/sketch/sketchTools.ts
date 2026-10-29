@@ -28,7 +28,11 @@ export type Draft =
   /** Turning a solid: picked, then the point it turns round (on the work plane, about its normal). */
   | { tool: 'rotate'; solidId: string; pivot?: Vec2 }
   /** Mirroring a solid: picked, then the mirror line's first point. */
-  | { tool: 'mirror'; solidId: string; a?: Vec2 };
+  | { tool: 'mirror'; solidId: string; a?: Vec2 }
+  /** Setting a reference photo's scale: two points on it a known length apart, then that length. */
+  | { tool: 'photo-scale'; refId: string; a?: Vec2; b?: Vec2 }
+  /** Moving a reference photo: a point on it, then where that point goes. */
+  | { tool: 'photo-move'; refId: string; from?: Vec2 };
 
 export interface Step { draft: Draft | null; commit?: SketchShape }
 

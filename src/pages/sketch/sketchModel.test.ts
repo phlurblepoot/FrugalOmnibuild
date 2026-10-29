@@ -4,7 +4,7 @@ import {
   emptySketch, parseSketch, serializeSketch, formatLength, parseLength, circleThrough, arcPoints,
   rectanglePath, canPull, toWorld, shapeSnapPoints, faceFrame, samePlane, samePlaneSurface, toPlane, planSolids,
   pullAtPoint, removeShape, removeFeature, setPullDistance, axisClearOfShape, describeShape, usedShapeIds, recipePieces,
-  applyTransform, stepOfSolid, MM_PER_INCH, type PullFeature, type SketchDoc, type Vec2,
+  applyTransform, stepOfSolid, scaleReference, referenceCorners, MM_PER_INCH, type PullFeature, type SketchDoc, type Vec2,
 } from './sketchModel';
 import {
   gridStep, snapPoint, pointAt, angleDeg, parseAngle, levelAngleToward, angleFromLevel, type SnapTargets,
@@ -367,5 +367,30 @@ describe('joining, cutting, moving and copying solids', () => {
     near(applyTransform({ kind: 'rotate', origin: [50, 50, 0], axis: [0, 0, 2], angle: 90 }, [100, 50, 0], 2), [0, 50, 0]);
     near(applyTransform({ kind: 'mirror', origin: [300, 0, 0], normal: [1, 0, 0] }, [100, 4, 5]), [500, 4, 5]);
     near(applyTransform({ kind: 'mirror', origin: [0, 0, 0], normal: [0, 3, 0] }, [1, 2, 3]), [1, -2, 3]);
+  });
+});
+
+describe('reference photos', () => {
+  const photo = { id: 'r', fileId: 'f', name: 'detail.jpg', plane: 'front' as const, center: { x: 100, y: 50 }, width: 200, aspect: 0.5, rotation: 0, opacity: 0.6 };
+
+  it('older sketches open with none', () => {
+    const doc = parseSketch(JSON.stringify({ format: 'frugal-sketch', version: 1, units: 'imperial', shapes: [], features: [] }));
+    expect(doc.refs).toEqual([]);
+  });
+
+  it('scales a photo so a measured length comes out true, keeping the first point still', () => {
+    // On the photo, (0,50) to (100,50) is 100 mm now; it is really 300 mm.
+    const scaled = scaleReference(photo, { x: 0, y: 50 }, { x: 100, y: 50 }, 300);
+    expect(scaled.width).toBeCloseTo(600);
+    expect(scaled.center).toEqual({ x: 300, y: 50 });
+    expect(scaled.aspect).toBe(0.5);
+    // Nothing measured, nothing changes.
+    expect(scaleReference(photo, { x: 1, y: 1 }, { x: 1, y: 1 }, 300)).toBe(photo);
+  });
+
+  it('knows where its corners are when turned', () => {
+    const c = referenceCorners({ ...photo, rotation: 90 });
+    expect(c[0].x).toBeCloseTo(150); // bottom-left (−100, −50) turned a quarter: (50, −100) from the middle
+    expect(c[0].y).toBeCloseTo(-50);
   });
 });

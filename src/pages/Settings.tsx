@@ -29,6 +29,14 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.3',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 2, part 3): reference photos. Use the picture button in the toolbar to lay a photo, scan or print on the plane you are drawing on, and trace over it. Upload one, or pick a picture already in Documents; a PDF shows its first page. Pictures you add are filed in Documents as Sketch References.',
+      'Sketch: Set scale makes a photo measure true. Click the two ends of a length you know on it (a dimension on the print, a door width in a photo), then type how long it really is. Fade, Turn and Move are by it in the Reference photos list, which also hides or takes off a photo (its file stays in Documents).',
+    ],
+  },
+  {
     version: '4.6.9.2',
     date: 'October 29, 2026',
     changes: [

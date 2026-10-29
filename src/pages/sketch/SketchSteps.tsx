@@ -109,7 +109,7 @@ export const SketchSteps: React.FC<{
   const inputClass = 'rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500';
 
   return (
-    <div className="pointer-events-auto flex max-h-full w-64 flex-col rounded-lg border border-edge bg-raised/95 text-sm shadow-sm" data-testid="sketch-steps">
+    <div className="pointer-events-auto flex min-h-0 w-64 flex-col rounded-lg border border-edge bg-raised/95 text-sm shadow-sm" data-testid="sketch-steps">
       <div className="flex items-center justify-between border-b border-edge px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Steps</span>
         <button type="button" onClick={onClose} aria-label="Hide steps" className="rounded p-0.5 text-ink-faint hover:bg-hover hover:text-ink"><X size={14} /></button>

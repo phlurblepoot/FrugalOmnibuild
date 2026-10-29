@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, expect } from './fixtures/test';
 import type { Page } from '@playwright/test';
+
+const TEST_PNG = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'assets', 'test-page.png');
 
 // The Sketch tool (stage 1): the sidebar link, a new sketch filed in
 // Documents, a rectangle drawn with typed sizes on the Front plane, pulled
@@ -358,4 +363,69 @@ test('Sketch: join two solids, copy along, mirror and rotate, then delete a step
   await page.keyboard.press('Delete');
   await expect(page.getByTestId('sketch-step-5')).toHaveCount(0);
   await expect(page.getByTestId('sketch-step-3')).toContainText('Mirror');
+});
+
+test('Sketch: reference photos are laid on the plane, scaled from a known length, faded, turned, moved, hidden and taken off', async ({ authedPage: page, apiToken, request }) => {
+  const auth = { Authorization: `Bearer ${apiToken.token}` };
+  const png = readFileSync(TEST_PNG);
+  await page.goto('/tools/sketch?new=1');
+  await page.getByLabel('Name').fill('Traced detail');
+  await page.getByTestId('new-sketch-create').click();
+  await expect(page).toHaveURL(/\/tools\/sketch\?fileId=/);
+  const fileId = new URL(page.url()).searchParams.get('fileId')!;
+  const box = await viewBox(page);
+  const cx = box.x + box.width / 2 - 150, cy = box.y + box.height / 2;
+
+  // Two photos (the second must not replace the first).
+  for (const name of ['old-drawing.png', 'print-snippet.png']) {
+    await page.getByTestId('sketch-add-photo').click();
+    await expect(page.getByTestId('picker-upload-panel')).toBeVisible();
+    await page.getByTestId('picker-upload-input').setInputFiles({ name, mimeType: 'image/png', buffer: png });
+    await expect(page.getByTestId('picker-upload-panel')).toBeHidden({ timeout: 15_000 });
+  }
+  await expect(page.getByTestId('sketch-ref-0')).toContainText('old-drawing.png');
+  await expect(page.getByTestId('sketch-ref-1')).toContainText('print-snippet.png');
+
+  // Scale the second from a length known to be 2' (the two clicks are 200 px apart).
+  await page.getByTestId('sketch-ref-scale').click();
+  await expect(page.getByTestId('sketch-vcb')).toContainText('Click one end of a length you know');
+  await page.mouse.click(cx - 100, cy);
+  await page.mouse.click(cx + 100, cy);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('How long is that really?');
+  await page.getByTestId('sketch-typed-0').fill(`2'`);
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.getByText(`Scaled: that length is now 2' - 0"`)).toBeVisible();
+
+  // Fade it, turn it a little, and move it 50 px right.
+  await page.getByTestId('sketch-ref-opacity').fill('30');
+  await page.getByTestId('sketch-ref-opacity').blur();
+  await page.getByTestId('sketch-ref-turn').fill('15');
+  await page.getByTestId('sketch-ref-turn').press('Enter');
+  await page.getByTestId('sketch-ref-move').click();
+  await page.mouse.click(cx, cy);
+  await page.mouse.click(cx + 50, cy);
+
+  await page.getByTestId('sketch-save').click();
+  await expect(page.getByText('Saved as version 2')).toBeVisible();
+  let saved = JSON.parse(await (await request.get(`/api/files/${fileId}/content`, { headers: auth })).text());
+  expect(saved.refs).toHaveLength(2);
+  const [first, second] = saved.refs;
+  expect(first.fileId).not.toBe(second.fileId);
+  expect(second).toMatchObject({ name: 'print-snippet.png', plane: 'front', opacity: 0.3, rotation: 15 });
+  // The 2' was measured across 200 px of the view: the photo grew or shrank to match, and moved right.
+  expect(second.width).not.toBeCloseTo(first.width, 0);
+  expect(second.center.x).toBeGreaterThan(first.center.x);
+  // The pictures are filed in Documents as sketch references.
+  const docs = await (await request.get('/api/documents?kinds=sketch-photo', { headers: auth })).json();
+  expect(docs.rows.map((r: { id: string }) => r.id)).toEqual(expect.arrayContaining([first.fileId, second.fileId]));
+
+  // Hide the first, take the second off.
+  await page.getByTestId('sketch-ref-0').getByTestId('sketch-ref-visible').click();
+  await page.getByTestId('sketch-ref-1').getByTestId('sketch-ref-delete').click();
+  await expect(page.getByTestId('sketch-ref-1')).toHaveCount(0);
+  await page.getByTestId('sketch-save').click();
+  await expect(page.getByText('Saved as version 3')).toBeVisible();
+  saved = JSON.parse(await (await request.get(`/api/files/${fileId}/content`, { headers: auth })).text());
+  expect(saved.refs).toHaveLength(1);
+  expect(saved.refs[0]).toMatchObject({ name: 'old-drawing.png', hidden: true });
 });

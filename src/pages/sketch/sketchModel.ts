@@ -171,16 +171,36 @@ export type ShapeFeature = PullFeature | SpinFeature | RunFeature;
 export type SketchFeature = ShapeFeature | CombineFeature | MoveFeature;
 export const isShapeFeature = (f: SketchFeature): f is ShapeFeature => f.type === 'pull' || f.type === 'spin' || f.type === 'run';
 
+/** A photo, scan or print (a PDF's first page) laid on a plane to trace over. The file lives in Documents. */
+export interface ReferencePhoto {
+  id: string;
+  fileId: string;
+  name: string;
+  plane: SketchPlane;
+  /** Its middle, in the plane's millimetres. */
+  center: Vec2;
+  /** Across, in millimetres; its height follows from `aspect` (height ÷ width of the picture). */
+  width: number;
+  aspect: number;
+  /** Degrees, counter-clockwise. */
+  rotation: number;
+  /** 0.1 to 1. */
+  opacity: number;
+  hidden?: boolean;
+}
+
 export interface SketchDoc {
   format: typeof SKETCH_FORMAT;
   version: 1;
   units: SketchUnits;
   shapes: SketchShape[];
   features: SketchFeature[];
+  /** Reference photos (older sketches have none). */
+  refs: ReferencePhoto[];
 }
 
 export const emptySketch = (units: SketchUnits): SketchDoc => ({
-  format: SKETCH_FORMAT, version: 1, units, shapes: [], features: [],
+  format: SKETCH_FORMAT, version: 1, units, shapes: [], features: [], refs: [],
 });
 
 /** Reads a saved sketch, or throws when the file is not one. */
@@ -194,6 +214,7 @@ export const parseSketch = (text: string): SketchDoc => {
     units: raw.units === 'metric' ? 'metric' : 'imperial',
     shapes: Array.isArray(raw.shapes) ? raw.shapes : [],
     features: Array.isArray(raw.features) ? raw.features : [],
+    refs: Array.isArray(raw.refs) ? raw.refs : [],
   };
 };
 
@@ -640,4 +661,20 @@ export const cuttingPulls = (r: Recipe, out = new Set<string>()): Set<string> =>
     cuttingPulls(r.b, out);
   }
   return out;
+};
+
+/** A reference photo scaled so that the length between two points on it (in its plane) is `real` mm,
+ *  keeping the first point where it is. */
+export const scaleReference = (r: ReferencePhoto, a: Vec2, b: Vec2, real: number): ReferencePhoto => {
+  const measured = Math.hypot(b.x - a.x, b.y - a.y);
+  if (!(measured > 1e-9) || !(real > 0)) return r;
+  const k = real / measured;
+  return { ...r, width: r.width * k, center: { x: a.x + (r.center.x - a.x) * k, y: a.y + (r.center.y - a.y) * k } };
+};
+
+/** The corners of a reference photo, in its plane (for its outline). */
+export const referenceCorners = (r: ReferencePhoto): Vec2[] => {
+  const hw = r.width / 2, hh = (r.width * r.aspect) / 2;
+  const t = (r.rotation * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+  return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => ({ x: r.center.x + x * c - y * s, y: r.center.y + x * s + y * c }));
 };

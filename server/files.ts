@@ -77,6 +77,8 @@ export const MULTI_INSTANCE_KINDS = [
   'issue-photo', 'punch-photo', 'task-photo', 'change-order-photo', 'invoice-photo',
   'rfi-photo', 'proposal-photo', 'plan-source', 'daily-report-photo',
   'payment-attachment',
+  // A sketch can have several reference photos.
+  'sketch-photo',
   // Several attachments saved from one email message share a source triple
   // (sourceType='mailMessage', sourceId=<messageId>) — spec §3.2. The kind
   // alone only covers the default; CONTAINER_SOURCE_TYPES below is what makes
