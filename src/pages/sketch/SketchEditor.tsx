@@ -10,7 +10,8 @@ import { Link, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ArrowLeft, ArrowUpFromLine, Box, Circle, Combine, Eye, EyeOff, FileDown, FlipHorizontal2, ListOrdered, LoaderCircle, Magnet, Maximize,
-  ImagePlus, MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, SquareRoundCorner, Trash2, TriangleRight, Undo2,
+  Check, Hand, ImagePlus, MousePointer2, Move, PencilLine, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, SquareRoundCorner,
+  Trash2, TriangleRight, Undo2, X,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
@@ -51,7 +52,16 @@ import { FilePickerModal } from '../../components/FilePickerModal';
 // The mobile top bar sits above every page on phones (AppShell); the editor
 // fills whatever is left — the same rule as the document editor.
 const FULL_HEIGHT = 'h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] md:h-dvh';
-const CLICK_SLOP_PX = 6;
+/** How far (screen px) a press may wander and still be a click or tap: a fingertip wobbles more than a mouse. */
+const clickSlop = (pointerType: string) => (pointerType === 'touch' ? 12 : pointerType === 'pen' ? 8 : 6);
+/** How near (screen px) a point or line must be to snap to it or pick it. */
+const snapReach = (pointerType: string) => (pointerType === 'touch' ? 22 : pointerType === 'pen' ? 14 : 10);
+const DOUBLE_TAP_MS = 350;
+const PENCIL_KEY = 'sketch-pencil-only';
+const readPencilChoice = (): boolean | null => {
+  try { const v = localStorage.getItem(PENCIL_KEY); return v === '1' ? true : v === '0' ? false : null; } catch { return null; }
+};
+const coarsePointer = () => window.matchMedia('(pointer: coarse)').matches;
 
 const isDrawTool = (t: ToolId) => t === 'line' || t === 'rect' || t === 'circle';
 
@@ -243,6 +253,16 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const [edgeMode, setEdgeMode] = useState<'round' | 'bevel'>('round');
   const lastEdgeSize = useRef('');
   const pointerType = useRef('mouse');
+  // Touch screens: Back, Done and Cancel buttons while drawing, bigger targets, the readout clear of the finger.
+  const [touchUi, setTouchUi] = useState(coarsePointer);
+  // Once the Apple Pencil is used, it draws and fingers move the view (unless turned off).
+  const pencilChoice = useRef(readPencilChoice());
+  const [pencilOnly, setPencilOnlyState] = useState(() => pencilChoice.current === true);
+  const setPencilOnly = (on: boolean) => {
+    pencilChoice.current = on;
+    setPencilOnlyState(on);
+    try { localStorage.setItem(PENCIL_KEY, on ? '1' : '0'); } catch { /* private mode: just this visit */ }
+  };
   const [photoPicker, setPhotoPicker] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   // The step list starts open on wide screens.
@@ -344,14 +364,14 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     }
   }, [doc, plan, solids, selection, showDims, draft, refImages]);
   useEffect(() => { sceneRef.current?.setWorkPlane(plane); }, [plane]);
+  // Whether a press on the view works the tool (drawing, aiming a pull or a move) rather than moving the view.
+  const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull') || draft?.tool === 'spin'
+    || draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror'
+    || draft?.tool === 'photo-scale' || draft?.tool === 'photo-move');
   useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull') || draft?.tool === 'spin'
-      || draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror'
-      || draft?.tool === 'photo-scale' || draft?.tool === 'photo-move');
-    scene.setNavigation(drawing ? 'draw' : 'navigate');
-  }, [tool, draft, view, editable, facePick]);
+    sceneRef.current?.setNavigation(drawing ? 'draw' : 'navigate', pencilOnly);
+  }, [drawing, view, pencilOnly]);
+  useEffect(() => { sceneRef.current?.setReadoutClearOfFinger(touchUi); }, [touchUi]);
 
   const setView = (v: ViewName) => {
     setViewState(v);
@@ -386,7 +406,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const pickFace = (clientX: number, clientY: number) => {
     const scene = sceneRef.current;
     if (!scene || !doc) return;
-    const picked = scene.pick(clientX, clientY, 'solids');
+    const picked = scene.pick(clientX, clientY, 'solids', snapReach(pointerType.current));
     if (!picked || !('solid' in picked)) { toast('Click a face of a solid.', { type: 'warning' }); return; }
     if (!picked.solid.planar) { toast('That face is curved. Pick a flat face to draw on.', { type: 'warning' }); return; }
     const frame = faceFrame(picked.solid.point, picked.solid.normal);
@@ -462,6 +482,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     return snapPoint({
       raw, pxPerMm, step: gridStep(doc.units, pxPerMm), targets: snapTargets, from,
       free: mods.current.alt, shapes: mods.current.shift || snapShapes, angleStep: lock ? ANGLE_STEP_DEG : null,
+      reachPx: snapReach(pointerType.current),
     });
   };
 
@@ -791,7 +812,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
 
   /** The solid a pick landed on, or (failing a pick) the one the current selection picks out. */
   const solidAt = (clientX: number, clientY: number): string | null => {
-    const picked = sceneRef.current?.pick(clientX, clientY, 'solids');
+    const picked = sceneRef.current?.pick(clientX, clientY, 'solids', snapReach(pointerType.current));
     return picked && 'solid' in picked ? picked.solid.solidId : null;
   };
   const selectedSolid = (): string | null => {
@@ -1019,16 +1040,16 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       return;
     }
     if (!editable || tool === 'select') {
-      setSelection(selectionOf(doc, scene.pick(clientX, clientY)));
+      setSelection(selectionOf(doc, scene.pick(clientX, clientY, undefined, snapReach(pointerType.current))));
       return;
     }
     if (tool === 'pull') {
       if (draft?.tool === 'pull') commitPull(typedPull() ?? pullDistance.current);
-      else startPull(selectionOf(doc, scene.pick(clientX, clientY)));
+      else startPull(selectionOf(doc, scene.pick(clientX, clientY, undefined, snapReach(pointerType.current))));
       return;
     }
     if (tool === 'spin') {
-      if (draft?.tool !== 'spin') { startSpin(selectionOf(doc, scene.pick(clientX, clientY))); return; }
+      if (draft?.tool !== 'spin') { startSpin(selectionOf(doc, scene.pick(clientX, clientY, undefined, snapReach(pointerType.current)))); return; }
       const snapped = snappedAt(clientX, clientY);
       if (!snapped) return;
       if (!draft.a) setDraft({ ...draft, a: snapped.p });
@@ -1036,7 +1057,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       return;
     }
     if (tool === 'run') {
-      const picked = selectionOf(doc, scene.pick(clientX, clientY));
+      const picked = selectionOf(doc, scene.pick(clientX, clientY, undefined, snapReach(pointerType.current)));
       if (draft?.tool !== 'run') startRun(picked);
       else commitRun(draft, picked);
       return;
@@ -1276,39 +1297,109 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   }, [dirty, editable]);
 
   // ── Pointer events on the view ────────────────────────────────────────────
-  const down = useRef<{ id: number; x: number; y: number } | null>(null);
-  const activePointers = useRef(new Set<number>());
+  // A mouse clicks. A finger or the Pencil presses, slides to aim (the snap and
+  // readout follow) and lifts to place the point. Two fingers pinch and pan;
+  // a two-finger tap undoes (or, while drawing, steps back) and a three-finger
+  // tap redoes. Once the Pencil is used it draws and fingers move the view.
+  const down = useRef<{ id: number; x: number; y: number; type: string } | null>(null);
+  // Pointers down on the view, by id, with their type.
+  const activePointers = useRef(new Map<number, string>());
+  const touches = useRef(new Map<number, { x: number; y: number }>());
+  const tapGesture = useRef<{ start: number; most: number; moved: boolean } | null>(null);
+  const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
   const readMods = (e: React.PointerEvent) => { mods.current = { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }; };
+  /** A finger on the view while the Pencil draws only moves the view (taps still pick, outside drawing). */
+  const fingerJustMoves = (e: React.PointerEvent) => e.pointerType === 'touch' && pencilOnly && drawing;
+
+  const finishLine = () => {
+    if (editable && draft?.tool === 'line') applyStep(lineFinish(draft, () => uuidv4()));
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
+    // The first pointer of its kind: any of that kind still listed lifted somewhere unseen.
+    if (e.isPrimary) for (const [id, type] of activePointers.current) if (type === e.pointerType) activePointers.current.delete(id);
+    activePointers.current.set(e.pointerId, e.pointerType);
+    if (e.pointerType === 'touch' && e.isPrimary) touches.current.clear();
+    if ((e.pointerType !== 'mouse') !== touchUi) setTouchUi(e.pointerType !== 'mouse');
+    if (e.pointerType === 'pen' && pencilChoice.current === null) setPencilOnly(true);
+    if (e.pointerType === 'touch') {
+      if (touches.current.size === 0) tapGesture.current = { start: performance.now(), most: 0, moved: false };
+      touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (tapGesture.current) tapGesture.current.most = Math.max(tapGesture.current.most, touches.current.size);
+    }
+    // While the Pencil draws, fingers (a resting palm too) only move the view: they neither count
+    // as a second pointer nor cancel the Pencil's press.
+    if (fingerJustMoves(e) || (pencilOnly && e.pointerType === 'touch' && down.current?.type === 'pen')) return;
+    const counted = pencilOnly && e.pointerType !== 'touch'
+      ? [...activePointers.current.values()].filter(t => t !== 'touch').length : activePointers.current.size;
+    // A second finger turns the press into a pinch or pan: nothing is placed.
+    if (counted > 1) { down.current = null; return; }
     pointerType.current = e.pointerType;
-    activePointers.current.add(e.pointerId);
     pointer.current = { x: e.clientX, y: e.clientY };
     readMods(e);
     if (e.pointerType === 'mouse' && e.button !== 0) { down.current = null; return; }
-    down.current = activePointers.current.size === 1 ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+    down.current = { id: e.pointerId, x: e.clientX, y: e.clientY, type: e.pointerType };
+    // While the Pencil draws, a palm resting on the screen cannot move the view.
+    if (e.pointerType === 'pen' && drawing) sceneRef.current?.holdView(true);
     refreshPreview();
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      const at = touches.current.get(e.pointerId);
+      if (at && tapGesture.current && Math.hypot(e.clientX - at.x, e.clientY - at.y) > clickSlop('touch')) tapGesture.current.moved = true;
+      if (pencilOnly || activePointers.current.size > 1) return;
+    }
     pointerType.current = e.pointerType;
     pointer.current = { x: e.clientX, y: e.clientY };
     readMods(e);
     refreshPreview();
   };
+  const endTouch = (e: React.PointerEvent, cancelled: boolean) => {
+    if (e.pointerType !== 'touch' || !touches.current.delete(e.pointerId)) return;
+    const g = tapGesture.current;
+    if (touches.current.size > 0 || !g) return;
+    tapGesture.current = null;
+    if (cancelled || g.moved || performance.now() - g.start > 400 || !editable) return;
+    if (g.most === 2) { if (draftRef.current) stepBack(); else undo(); }
+    else if (g.most === 3) redo();
+  };
   const onPointerUp = (e: React.PointerEvent) => {
     activePointers.current.delete(e.pointerId);
+    endTouch(e, false);
+    if (e.pointerType === 'pen') sceneRef.current?.holdView(false);
     readMods(e);
     const d = down.current;
     down.current = null;
     if (!d || d.id !== e.pointerId) return;
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > CLICK_SLOP_PX) return;
+    const moved = Math.hypot(e.clientX - d.x, e.clientY - d.y) > clickSlop(e.pointerType);
+    // A finger or the Pencil places the point where it lifts; a mouse dragged is not a click.
+    if (moved && (e.pointerType === 'mouse' || !drawing)) return;
+    if (e.pointerType !== 'mouse') {
+      // A double-tap ends a line where the first tap put its last point (as a double-click does).
+      const now = performance.now(), prev = lastTap.current;
+      lastTap.current = moved ? null : { t: now, x: e.clientX, y: e.clientY };
+      if (!moved && prev && now - prev.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 24
+        && draftRef.current?.tool === 'line') {
+        lastTap.current = null;
+        finishLine();
+        return;
+      }
+    }
     handleClick(e.clientX, e.clientY);
+  };
+  const onPointerCancel = (e: React.PointerEvent) => {
+    activePointers.current.delete(e.pointerId);
+    endTouch(e, true);
+    if (e.pointerType === 'pen') sceneRef.current?.holdView(false);
+    down.current = null;
   };
   const onPointerLeave = () => {
     pointer.current = null;
     if (editable && isDrawTool(tool) && !draft) sceneRef.current?.setPreview({ shape: null, snap: null, readout: null, pull: null });
   };
   const onDoubleClick = () => {
-    if (editable && draft?.tool === 'line') applyStep(lineFinish(draft, () => uuidv4()));
+    // Taps are handled above (a double-tap's synthesised double-click would end the line twice).
+    if (pointerType.current === 'mouse') finishLine();
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1363,7 +1454,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   );
 
   return (
-    <div className={`flex flex-col ${FULL_HEIGHT}`} data-testid="sketch-editor">
+    <div className={`flex touch-manipulation flex-col ${FULL_HEIGHT}`} data-testid="sketch-editor">
       <header className="flex items-center gap-2 border-b border-edge bg-raised px-3 py-2">
         <Link to="/tools/sketch" className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-ink-soft hover:bg-hover hover:text-ink">
           <ArrowLeft size={16} /><span className="hidden sm:inline">Sketches</span>
@@ -1468,6 +1559,21 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             >
               <TriangleRight size={18} />
             </button>
+            {touchUi && (
+              <button
+                type="button"
+                data-testid="sketch-pencil-only"
+                onClick={() => setPencilOnly(!pencilOnly)}
+                title={pencilOnly
+                  ? 'The Apple Pencil draws and fingers move the view. Tap to draw with a finger too.'
+                  : 'Fingers draw. Tap to draw with the Apple Pencil only, so fingers just move the view.'}
+                aria-label="Draw with the Pencil only"
+                aria-pressed={pencilOnly}
+                className={`flex size-10 items-center justify-center rounded-lg transition-colors ${pencilOnly ? 'bg-cyan-600 text-white' : 'text-ink-soft hover:bg-hover hover:text-ink'}`}
+              >
+                {pencilOnly ? <PencilLine size={18} /> : <Hand size={18} />}
+              </button>
+            )}
             <div className="my-1 h-px w-8 bg-edge" />
             <button type="button" onClick={undo} disabled={past.current.length === 0} title="Undo (Ctrl+Z)" aria-label="Undo"
               className="flex size-10 items-center justify-center rounded-lg text-ink-soft hover:bg-hover disabled:opacity-40"><Undo2 size={18} /></button>
@@ -1479,7 +1585,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
           </aside>
         )}
 
-        <div className="relative min-w-0 flex-1 overflow-hidden">
+        <div className="relative min-w-0 flex-1 select-none overflow-hidden [-webkit-touch-callout:none]">
           <div
             ref={containerRef}
             data-testid="sketch-view"
@@ -1487,7 +1593,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            onPointerCancel={e => { activePointers.current.delete(e.pointerId); down.current = null; }}
+            onPointerCancel={onPointerCancel}
             onPointerLeave={onPointerLeave}
             onDoubleClick={onDoubleClick}
             onContextMenu={e => e.preventDefault()}
@@ -1498,7 +1604,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
               <span className="px-1.5 text-ink-faint">Draw on</span>
               {(['front', 'side', 'ground'] as PlaneId[]).map(p => (
                 <button key={p} type="button" data-testid={`sketch-plane-${p}`} onClick={() => setPlane(p)} aria-pressed={plane === p && !facePick}
-                  className={`rounded-md px-2 py-1 font-medium ${plane === p && !facePick ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
+                  className={`rounded-md px-2 py-1 font-medium pointer-coarse:px-3 pointer-coarse:py-2 ${plane === p && !facePick ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
                   {PLANE_LABELS[p]}
                 </button>
               ))}
@@ -1512,7 +1618,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                 disabled={solids.length === 0}
                 title={solids.length === 0 ? 'Pull a shape into a solid first, then draw on its faces' : 'Draw on a flat face of a solid: click this, then click the face'}
                 aria-pressed={facePick || typeof plane !== 'string'}
-                className={`rounded-md px-2 py-1 font-medium disabled:opacity-40 ${facePick || typeof plane !== 'string' ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
+                className={`rounded-md px-2 py-1 font-medium pointer-coarse:px-3 pointer-coarse:py-2 disabled:opacity-40 ${facePick || typeof plane !== 'string' ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
                 Face
               </button>
             </div>
@@ -1521,21 +1627,21 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
           <div className="pointer-events-auto absolute right-3 top-3 flex items-center gap-1 rounded-lg border border-edge bg-raised/95 p-1 text-xs shadow-sm">
             {(['top', 'front', 'side'] as ViewName[]).map(v => (
               <button key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v} data-testid={`sketch-view-${v}`}
-                className={`rounded-md px-2 py-1 font-medium capitalize ${view === v ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>{v}</button>
+                className={`rounded-md px-2 py-1 font-medium pointer-coarse:px-3 pointer-coarse:py-2 capitalize ${view === v ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>{v}</button>
             ))}
             <button type="button" onClick={() => setView('iso')} aria-pressed={view === 'iso'} title="3D view" data-testid="sketch-view-iso"
-              className={`flex items-center gap-1 rounded-md px-2 py-1 font-medium ${view === 'iso' ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}><Box size={13} />3D</button>
+              className={`flex items-center gap-1 rounded-md px-2 py-1 font-medium pointer-coarse:px-3 pointer-coarse:py-2 ${view === 'iso' ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}><Box size={13} />3D</button>
             <button type="button" onClick={togglePerspective} aria-pressed={perspective} data-testid="sketch-perspective"
               title={perspective ? 'Perspective is on in the 3D view (further away looks smaller). Click for a flat 3D view.' : 'Turn on perspective for the 3D view'}
-              className={`rounded-md px-2 py-1 font-medium ${perspective ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>Perspective</button>
+              className={`rounded-md px-2 py-1 font-medium pointer-coarse:px-3 pointer-coarse:py-2 ${perspective ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>Perspective</button>
             <div className="mx-0.5 h-4 w-px bg-edge" />
             <button type="button" onClick={() => doc && sceneRef.current?.fit(doc, solids)} title="Fit everything in view" aria-label="Fit"
-              className="rounded-md p-1 text-ink-soft hover:bg-hover"><Maximize size={14} /></button>
+              className="rounded-md p-1 text-ink-soft hover:bg-hover pointer-coarse:p-2"><Maximize size={14} /></button>
             <button type="button" onClick={() => setShowDims(s => !s)} title={showDims ? 'Hide dimensions' : 'Show dimensions'} aria-label="Dimensions"
-              aria-pressed={showDims} className="rounded-md p-1 text-ink-soft hover:bg-hover">{showDims ? <Eye size={14} /> : <EyeOff size={14} />}</button>
+              aria-pressed={showDims} className="rounded-md p-1 text-ink-soft hover:bg-hover pointer-coarse:p-2">{showDims ? <Eye size={14} /> : <EyeOff size={14} />}</button>
             <button type="button" onClick={() => setShowSteps(v => !v)} aria-pressed={showSteps} data-testid="sketch-steps-toggle"
               title={showSteps ? 'Hide the steps' : 'Show the steps'}
-              className={`flex items-center gap-1 rounded-md px-1.5 py-1 font-medium ${showSteps ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>
+              className={`flex items-center gap-1 rounded-md px-1.5 py-1 font-medium pointer-coarse:px-2.5 pointer-coarse:py-2 ${showSteps ? 'bg-sunken text-ink' : 'text-ink-soft hover:bg-hover'}`}>
               <ListOrdered size={14} />{doc?.features.length ? doc.features.length : ''}
             </button>
           </div>
@@ -1621,7 +1727,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                           }}
                           placeholder={f.placeholder}
                           inputMode="text"
-                          className="w-24 rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-500"
+                          className="w-24 rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-500 pointer-coarse:py-2 pointer-coarse:text-base"
                         />
                       </label>
                     ))}
@@ -1637,7 +1743,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                   <span className="flex items-center gap-0.5 rounded-md border border-edge p-0.5 text-xs">
                     {(['join', 'cut'] as const).map(m => (
                       <button key={m} type="button" data-testid={`sketch-combine-${m}`} onClick={() => setCombineMode(m)} aria-pressed={combineMode === m}
-                        className={`rounded px-2 py-0.5 font-medium ${combineMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
+                        className={`rounded px-2 py-0.5 font-medium pointer-coarse:px-3 pointer-coarse:py-1.5 ${combineMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
                         {m === 'join' ? 'Join' : 'Cut'}
                       </button>
                     ))}
@@ -1647,7 +1753,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                   <span className="flex items-center gap-0.5 rounded-md border border-edge p-0.5 text-xs">
                     {(['round', 'bevel'] as const).map(m => (
                       <button key={m} type="button" data-testid={`sketch-edges-${m}`} onClick={() => setEdgeMode(m)} aria-pressed={edgeMode === m}
-                        className={`rounded px-2 py-0.5 font-medium ${edgeMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
+                        className={`rounded px-2 py-0.5 font-medium pointer-coarse:px-3 pointer-coarse:py-1.5 ${edgeMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
                         {m === 'round' ? 'Round' : 'Bevel'}
                       </button>
                     ))}
@@ -1657,7 +1763,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                   <label className="flex items-center gap-1.5 text-xs text-ink-soft" title="0 moves the solid itself; more leaves it and makes that many copies, each one step further on">
                     Copies
                     <input value={copiesText} onChange={e => setCopiesText(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" data-testid="sketch-copies"
-                      className="w-12 rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                      className="w-12 rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500 pointer-coarse:py-2 pointer-coarse:text-base" />
                   </label>
                 )}
                 {tool === 'mirror' && (
@@ -1668,6 +1774,18 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                 )}
                 {draft?.tool === 'line' && (
                   <span className="text-xs text-ink-faint">{draft.arcThrough ? 'Click where the arc ends.' : arcMode ? 'Arc: click a point on the curve.' : ''}</span>
+                )}
+                {/* Without a keyboard: Backspace, Enter (leave the line open) and Escape as buttons. */}
+                {touchUi && draft && (
+                  <span className="flex items-center gap-1">
+                    {(draft.tool === 'line' || draft.tool === 'edges') && (
+                      <Button size="sm" variant="secondary" onClick={stepBack} data-testid="sketch-back"><Undo2 size={14} />Back</Button>
+                    )}
+                    {draft.tool === 'line' && draft.segments.length > 0 && (
+                      <Button size="sm" variant="secondary" onClick={finishLine} data-testid="sketch-done" title="Keep it as an open line"><Check size={14} />Done</Button>
+                    )}
+                    <Button size="sm" variant="secondary" onClick={() => { setDraft(null); setTyped(['', '']); }} data-testid="sketch-cancel"><X size={14} />Cancel</Button>
+                  </span>
                 )}
               </div>
             </div>

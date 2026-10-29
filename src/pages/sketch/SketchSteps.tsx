@@ -120,7 +120,7 @@ export const SketchSteps: React.FC<{
     }
   };
 
-  const inputClass = 'rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500';
+  const inputClass = 'rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500 pointer-coarse:py-2 pointer-coarse:text-base';
 
   return (
     <div className="pointer-events-auto flex min-h-0 w-64 flex-col rounded-lg border border-edge bg-raised/95 text-sm shadow-sm" data-testid="sketch-steps">
@@ -152,7 +152,7 @@ export const SketchSteps: React.FC<{
                   {canEdit && (
                     <button type="button" onClick={() => { onChange(removeFeature(doc, f.id)); if (isSel) onSelect(null); }}
                       aria-label={`Delete step ${i + 1}`} title={isShapeFeature(f) ? 'Delete this step (its shape stays)' : 'Delete this step'} data-testid="sketch-step-delete"
-                      className="shrink-0 rounded p-1 text-ink-faint hover:bg-hover hover:text-red-600"><Trash2 size={14} /></button>
+                      className="shrink-0 rounded p-1 text-ink-faint hover:bg-hover hover:text-red-600 pointer-coarse:p-2"><Trash2 size={14} /></button>
                   )}
                 </div>
                 {ed && canEdit && (

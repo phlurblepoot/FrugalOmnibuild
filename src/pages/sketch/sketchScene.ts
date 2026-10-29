@@ -297,14 +297,27 @@ export class SketchScene {
   }
 
   /** How the pointer drives the view: drawing keeps one finger / the left
-   *  button for the tool, otherwise it pans (flat views) or orbits (3D). */
-  setNavigation(mode: 'draw' | 'navigate'): void {
+   *  button (and the Pencil) for the tool, otherwise it pans (flat views) or
+   *  orbits (3D). With `fingersNavigate` (the Pencil draws), one finger
+   *  always moves the view. Two fingers always pinch and pan. */
+  setNavigation(mode: 'draw' | 'navigate', fingersNavigate = false): void {
     const orbit = this.view === 'iso';
     const leftAction = mode === 'draw' ? -1 : orbit ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
     this.controls.mouseButtons = { LEFT: leftAction as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-    const oneTouch = mode === 'draw' ? -1 : orbit ? THREE.TOUCH.ROTATE : THREE.TOUCH.PAN;
+    const oneTouch = mode === 'draw' && !fingersNavigate ? -1 : orbit ? THREE.TOUCH.ROTATE : THREE.TOUCH.PAN;
     this.controls.touches = { ONE: oneTouch as THREE.TOUCH, TWO: THREE.TOUCH.DOLLY_PAN };
   }
+
+  /** Stops the view moving (while the Pencil draws, so a resting palm cannot pan it). */
+  holdView(hold: boolean): void {
+    this.controls.enabled = !hold;
+  }
+
+  /** Lifts the live readout well clear of the point, so a fingertip on it does not hide it. */
+  setReadoutClearOfFinger(on: boolean): void {
+    this.readoutLift = on ? 3.4 : 1.4;
+  }
+  private readoutLift = 1.4;
 
   /** Zoom and centre on everything drawn (or a default area when empty). */
   fit(doc: SketchDoc, solids: SolidMesh[]): void {
@@ -400,11 +413,11 @@ export class SketchScene {
     return { x: rel.dot(v3(f.xDir)), y: rel.dot(v3(f.yDir)) };
   }
 
-  /** The shape or solid under the pointer. */
-  pick(clientX: number, clientY: number, only?: 'solids'): Pick {
+  /** The shape or solid under the pointer (a line within `slopPx` of it counts). */
+  pick(clientX: number, clientY: number, only?: 'solids', slopPx = 10): Pick {
     this.rayAt(clientX, clientY);
     const px = this.pxPerMm();
-    this.raycaster.params.Line = { threshold: 10 / px };
+    this.raycaster.params.Line = { threshold: slopPx / px };
     const all = this.raycaster.intersectObjects(only === 'solids' ? this.pickables.filter(o => o.userData.solid) : this.pickables, false);
     // Reference photos only when nothing else is there: they lie behind the drawing.
     const hits = all.filter(h => !h.object.userData.refId);
@@ -740,7 +753,7 @@ export class SketchScene {
     if (p.readout) {
       const obj = new CSS2DObject(labelEl(p.readout.text, 'readout'));
       obj.position.copy(v3(p.readout.at));
-      obj.center.set(-0.15, 1.4);
+      obj.center.set(-0.15, this.readoutLift);
       this.preview.add(obj);
     }
     this.requestRender();

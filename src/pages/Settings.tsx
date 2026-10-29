@@ -29,6 +29,16 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.7',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 4, part 2): drawing on an iPad. With a finger or the Apple Pencil, press, slide to aim (the snapping and the length follow, shown above your fingertip) and lift to place the point; pull and move the same way. Points and lines are easier to hit with a finger.',
+      'Sketch: the Apple Pencil shows where it will draw while it hovers (on iPads that support it). Once you use the Pencil it does the drawing and fingers move the view, so a resting hand cannot add points; the hand button in the toolbar lets fingers draw again.',
+      'Sketch: on a touch screen, double-tap to end a line where it is; tap with two fingers to undo (while drawing, to take back the last point) and with three to redo. Back, Done and Cancel buttons appear while drawing, for when there is no keyboard.',
+      'Sketch: bigger buttons on touch screens, and typing a size no longer makes an iPad zoom in.',
+    ],
+  },
+  {
     version: '4.6.9.6',
     date: 'October 29, 2026',
     changes: [
