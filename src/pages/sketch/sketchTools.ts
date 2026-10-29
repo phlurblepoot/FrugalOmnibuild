@@ -8,7 +8,7 @@ import {
 } from './sketchModel';
 import { pointAt } from './sketchSnap';
 
-export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull' | 'spin' | 'run';
+export type ToolId = 'select' | 'line' | 'rect' | 'circle' | 'pull' | 'spin' | 'run' | 'combine' | 'move' | 'rotate' | 'mirror';
 
 export type Draft =
   /** A chain of lines and arcs. `arcThrough` is set while an arc waits for its end. */
@@ -20,7 +20,15 @@ export type Draft =
   /** Spinning a shape: picked, then the axis's first point (`a`), then its second. */
   | { tool: 'spin'; shapeId: string; a?: Vec2 }
   /** Running a profile along a path: the profile is picked, the path comes next. */
-  | { tool: 'run'; shapeId: string };
+  | { tool: 'run'; shapeId: string }
+  /** Joining or cutting: the first solid is picked, the second comes next. */
+  | { tool: 'combine'; targetId: string }
+  /** Moving a solid: picked, then the point it moves from. */
+  | { tool: 'move'; solidId: string; from?: Vec2 }
+  /** Turning a solid: picked, then the point it turns round (on the work plane, about its normal). */
+  | { tool: 'rotate'; solidId: string; pivot?: Vec2 }
+  /** Mirroring a solid: picked, then the mirror line's first point. */
+  | { tool: 'mirror'; solidId: string; a?: Vec2 };
 
 export interface Step { draft: Draft | null; commit?: SketchShape }
 
@@ -101,7 +109,7 @@ export const circleTyped = (draft: Draft | null, radius: number, newId: () => st
 
 /** The outline to show for a draft while the pointer is at `at` (open path, plane mm). */
 export const draftPreview = (draft: Draft | null, at: Vec2 | null): SketchShape | null => {
-  if (!draft || draft.tool === 'pull' || draft.tool === 'spin' || draft.tool === 'run') return null;
+  if (!draft || (draft.tool !== 'line' && draft.tool !== 'rect' && draft.tool !== 'circle')) return null;
   if (draft.tool === 'rect') return at ? rectanglePath('preview', draft.plane, draft.a, at) : null;
   if (draft.tool === 'circle') return at ? { id: 'preview', type: 'circle', plane: draft.plane, center: draft.center, radius: dist2(draft.center, at) } : null;
   const segments = [...draft.segments];

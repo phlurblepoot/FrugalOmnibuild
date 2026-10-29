@@ -29,6 +29,17 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.9.2',
+    date: 'October 29, 2026',
+    changes: [
+      'Sketch (stage 2, part 2): Join/Cut (J) puts two solids together, or cuts one away from another. Pick Join or Cut at the bottom, then click the two solids.',
+      'Sketch: Move (M) moves a solid, or with Copies set, leaves it and makes that many copies, each one step further on. Click the solid, the point to move from, then where it goes, or type the length and angle. You see where it will land before you click.',
+      'Sketch: Rotate (T) turns a solid round a point on the plane you draw on, by the angle you click or type (counter-clockwise; minus for clockwise). With Copies it makes copies round the point.',
+      'Sketch: Mirror (I) flips a solid across a line you click on the plane you draw on, keeping the original unless you untick Keep the original.',
+      'Sketch: these steps show in the Steps list too, where a move\'s distance, a rotation\'s angle and the number of copies can be changed. Deleting a solid tidies away the joins, moves and copies that used it.',
+    ],
+  },
+  {
     version: '4.6.9.1',
     date: 'October 29, 2026',
     changes: [

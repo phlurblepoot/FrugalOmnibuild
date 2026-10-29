@@ -4,7 +4,7 @@ import {
   emptySketch, parseSketch, serializeSketch, formatLength, parseLength, circleThrough, arcPoints,
   rectanglePath, canPull, toWorld, shapeSnapPoints, faceFrame, samePlane, samePlaneSurface, toPlane, planSolids,
   pullAtPoint, removeShape, removeFeature, setPullDistance, axisClearOfShape, describeShape, usedShapeIds, recipePieces,
-  MM_PER_INCH, type PullFeature, type SketchDoc, type Vec2,
+  applyTransform, stepOfSolid, MM_PER_INCH, type PullFeature, type SketchDoc, type Vec2,
 } from './sketchModel';
 import {
   gridStep, snapPoint, pointAt, angleDeg, parseAngle, levelAngleToward, angleFromLevel, type SnapTargets,
@@ -306,5 +306,66 @@ describe('spin and run', () => {
     expect(describeShape(inchRect('r', 'front', 0, 0, 6, 4), 'imperial')).toBe('Rectangle 6" × 4"');
     expect(describeShape({ id: 'c', type: 'circle', plane: 'front', center: { x: 0, y: 0 }, radius: inch(1.5) }, 'imperial')).toBe('Circle Ø 3"');
     expect(describeShape({ id: 'p', type: 'path', plane: 'front', start: { x: 0, y: 0 }, closed: false, segments: [{ kind: 'line', to: { x: 1, y: 0 } }] }, 'metric')).toBe('Path, 1 piece');
+  });
+});
+
+describe('joining, cutting, moving and copying solids', () => {
+  const twoBlocks = (): SketchDoc => {
+    const doc = emptySketch('metric');
+    doc.shapes.push(
+      rectanglePath('a', 'ground', { x: 0, y: 0 }, { x: 100, y: 50 }),
+      rectanglePath('b', 'ground', { x: 80, y: 0 }, { x: 200, y: 50 }),
+    );
+    doc.features.push({ id: 'pa', type: 'pull', shapeId: 'a', distance: 30 }, { id: 'pb', type: 'pull', shapeId: 'b', distance: 60 });
+    return doc;
+  };
+
+  it('a join or cut uses up the second solid', () => {
+    const doc = twoBlocks();
+    doc.features.push({ id: 'c1', type: 'combine', mode: 'cut', targetId: 'pa', toolId: 'pb' });
+    const plan = planSolids(doc);
+    expect(plan.solids.map(s => s.id)).toEqual(['pa']);
+    expect(plan.solids[0].featureIds).toEqual(['pa', 'pb', 'c1']);
+    expect(plan.solids[0].recipe).toMatchObject({ op: 'cut', fid: 'c1', a: { op: 'pull', fid: 'pa' }, b: { op: 'pull', fid: 'pb' } });
+    // A later step that names the used-up solid works on the one it went into.
+    doc.features.push({ id: 'm1', type: 'move', targetId: 'pb', transform: { kind: 'move', by: [0, 0, 10] }, copies: 0 });
+    const after = planSolids(doc);
+    expect(after.solids[0].featureIds).toContain('m1');
+    expect(after.solids[0].recipe.op).toBe('transform');
+    expect(after.solids[0].pullIds).toEqual([]); // moved: no outline is where it was drawn any more
+  });
+
+  it('copies are new solids, each one step further on; the original stays', () => {
+    const doc = twoBlocks();
+    doc.features.push({ id: 'm1', type: 'move', targetId: 'pa', transform: { kind: 'move', by: [0, 300, 0] }, copies: 2 });
+    const plan = planSolids(doc);
+    expect(plan.solids.map(s => s.id)).toEqual(['pa', 'pb', 'm1:1', 'm1:2']);
+    expect(plan.solids[3].recipe).toMatchObject({ op: 'transform', times: 2, of: { op: 'pull', fid: 'pa' } });
+    expect(stepOfSolid('m1:2')).toBe('m1');
+    expect(stepOfSolid('pa')).toBe('pa');
+    // A mirror with "keep the original" makes one copy, however many were asked for.
+    doc.features.push({ id: 'mi', type: 'move', targetId: 'pb', transform: { kind: 'mirror', origin: [0, 0, 0], normal: [1, 0, 0] }, copies: 5 });
+    expect(planSolids(doc).solids.map(s => s.id)).toEqual(['pa', 'pb', 'm1:1', 'm1:2', 'mi:1']);
+  });
+
+  it('deleting a solid tidies away the joins, moves and copies that needed it', () => {
+    const doc = twoBlocks();
+    doc.features.push(
+      { id: 'm1', type: 'move', targetId: 'pa', transform: { kind: 'move', by: [0, 300, 0] }, copies: 1 },
+      { id: 'c1', type: 'combine', mode: 'join', targetId: 'pb', toolId: 'm1:1' },
+    );
+    const after = removeShape(doc, 'a');
+    expect(after.features.map(f => f.id)).toEqual(['pb']);
+    // Deleting just the copy step takes the join that used the copy.
+    expect(removeFeature(doc, 'm1').features.map(f => f.id)).toEqual(['pa', 'pb']);
+  });
+
+  it('moves, turns and mirrors points as the solids will be', () => {
+    const near = (a: number[], b: number[]) => a.forEach((v, i) => expect(v).toBeCloseTo(b[i], 9));
+    near(applyTransform({ kind: 'move', by: [10, 0, -5] }, [1, 2, 3], 2), [21, 2, -7]);
+    near(applyTransform({ kind: 'rotate', origin: [0, 0, 0], axis: [0, 0, 1], angle: 90 }, [100, 0, 7]), [0, 100, 7]);
+    near(applyTransform({ kind: 'rotate', origin: [50, 50, 0], axis: [0, 0, 2], angle: 90 }, [100, 50, 0], 2), [0, 50, 0]);
+    near(applyTransform({ kind: 'mirror', origin: [300, 0, 0], normal: [1, 0, 0] }, [100, 4, 5]), [500, 4, 5]);
+    near(applyTransform({ kind: 'mirror', origin: [0, 0, 0], normal: [0, 3, 0] }, [1, 2, 3]), [1, -2, 3]);
   });
 });

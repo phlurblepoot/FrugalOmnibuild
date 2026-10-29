@@ -263,3 +263,99 @@ test('Sketch: spin a profile round a line, run a profile along a path, and chang
   expect(saved.features.map((f: { type: string }) => f.type)).toEqual(['spin']);
   expect(saved.shapes).toHaveLength(3);
 });
+
+test('Sketch: join two solids, copy along, mirror and rotate, then delete a step', async ({ authedPage: page, apiToken, request }) => {
+  const auth = { Authorization: `Bearer ${apiToken.token}` };
+  await page.goto('/tools/sketch?new=1');
+  await page.getByLabel('Name').fill('Solids');
+  await page.getByTestId('new-sketch-create').click();
+  await expect(page).toHaveURL(/\/tools\/sketch\?fileId=/);
+  const fileId = new URL(page.url()).searchParams.get('fileId')!;
+  const box = await viewBox(page);
+  const cx = box.x + box.width / 2 - 150, cy = box.y + box.height / 2 + 60;
+  const rect = async (x: number, y: number, w: string, h: string) => {
+    await page.getByTestId('sketch-tool-rect').click();
+    await page.mouse.move(x, y);
+    await page.mouse.click(x, y);
+    await page.mouse.move(x + 60, y - 60);
+    await page.getByTestId('sketch-typed-0').fill(w);
+    await page.getByTestId('sketch-typed-1').fill(h);
+    await page.getByTestId('sketch-typed-1').press('Enter');
+  };
+  const pull = async (x: number, y: number, d: string) => {
+    await page.getByTestId('sketch-view-front').click();
+    await page.getByTestId('sketch-tool-pull').click();
+    await page.mouse.click(x, y);
+    await page.getByTestId('sketch-typed-0').fill(d);
+    await page.getByTestId('sketch-typed-0').press('Enter');
+  };
+
+  // Two overlapping blocks, A (4" × 2") and B (2" × 4"), pulled into solids.
+  await rect(cx, cy, '4', '2');
+  await rect(cx + 100, cy, '2', '4');
+  await pull(cx + 40, cy - 30, '2');
+  await pull(cx + 150, cy - 100, '3');
+  await expect(page.getByTestId('sketch-step-1')).toContainText('Pull 3"');
+
+  // Join them (seen from the front).
+  await page.getByTestId('sketch-view-front').click();
+  await page.getByTestId('sketch-tool-combine').click();
+  await expect(page.getByTestId('sketch-combine-join')).toHaveAttribute('aria-pressed', 'true');
+  await page.mouse.click(cx + 40, cy - 30);
+  await expect(page.getByTestId('sketch-vcb')).toContainText('click the solid to join');
+  await page.mouse.click(cx + 150, cy - 100);
+  await expect(page.getByTestId('sketch-step-2')).toContainText('Join two solids');
+
+  // Two copies, 6" apart to the right.
+  await page.getByTestId('sketch-tool-move').click();
+  await page.getByTestId('sketch-copies').fill('2');
+  await page.mouse.click(cx + 40, cy - 30);
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await page.mouse.move(cx + 250, cy - 10);
+  await page.getByTestId('sketch-typed-0').fill('6');
+  await page.getByTestId('sketch-typed-1').fill('0');
+  await page.getByTestId('sketch-typed-1').press('Enter');
+  await expect(page.getByTestId('sketch-step-3')).toContainText('Copy ×2, 6" apart');
+
+  // A mirrored copy across a plumb line to the left.
+  await page.getByTestId('sketch-tool-mirror').click();
+  await expect(page.getByTestId('sketch-mirror-keep')).toBeChecked();
+  await page.mouse.click(cx + 40, cy - 30);
+  await page.mouse.move(cx - 60, cy);
+  await page.mouse.click(cx - 60, cy);
+  await page.mouse.move(cx - 60, cy - 120);
+  await page.mouse.click(cx - 60, cy - 120);
+  await expect(page.getByTestId('sketch-step-4')).toContainText('Mirror copy');
+
+  // The original turned a quarter round its corner.
+  await page.getByTestId('sketch-tool-rotate').click();
+  await page.getByTestId('sketch-copies').fill('0');
+  await page.mouse.click(cx + 40, cy - 30);
+  await page.mouse.move(cx, cy);
+  await page.mouse.click(cx, cy);
+  await page.getByTestId('sketch-typed-0').fill('90');
+  await page.getByTestId('sketch-typed-0').press('Enter');
+  await expect(page.getByTestId('sketch-step-5')).toContainText('Rotate 90°');
+  await expect(page.getByText(/could not/)).toHaveCount(0);
+
+  await page.getByTestId('sketch-save').click();
+  await expect(page.getByText('Saved as version 2')).toBeVisible();
+  const saved = JSON.parse(await (await request.get(`/api/files/${fileId}/content`, { headers: auth })).text());
+  expect(saved.features.map((f: { type: string }) => f.type)).toEqual(['pull', 'pull', 'combine', 'move', 'move', 'move']);
+  expect(saved.features[3]).toMatchObject({ copies: 2, transform: { kind: 'move' } });
+  expect(Math.hypot(...saved.features[3].transform.by)).toBeCloseTo(6 * 25.4, 3);
+  expect(saved.features[4]).toMatchObject({ copies: 1, transform: { kind: 'mirror' } });
+  expect(saved.features[5]).toMatchObject({ copies: 0, transform: { kind: 'rotate', angle: 90 } });
+
+  // The copies' step, picked in the list, can have its count changed, then be deleted with the Delete key.
+  await page.getByTestId('sketch-step-3').getByRole('button').first().click();
+  await page.getByTestId('sketch-step-copies').fill('3');
+  await page.getByTestId('sketch-step-copies').press('Enter');
+  await expect(page.getByTestId('sketch-step-3')).toContainText('Copy ×3, 6" apart');
+  // (Delete in the box edits the box; out of it, it deletes the picked step.)
+  await page.getByTestId('sketch-step-copies').evaluate(el => (el as HTMLElement).blur());
+  await page.keyboard.press('Delete');
+  await expect(page.getByTestId('sketch-step-5')).toHaveCount(0);
+  await expect(page.getByTestId('sketch-step-3')).toContainText('Mirror');
+});

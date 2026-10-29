@@ -139,7 +139,37 @@ export interface RunFeature {
   pathId: string;
 }
 
-export type SketchFeature = PullFeature | SpinFeature | RunFeature;
+/** Join two solids into one, or cut the second away from the first (it is used up either way). */
+export interface CombineFeature {
+  id: string;
+  type: 'combine';
+  mode: 'join' | 'cut';
+  /** Solid ids (see PlannedSolid.id) when the step was made. */
+  targetId: string;
+  toolId: string;
+}
+
+/** Moving, turning or mirroring a solid, in world millimetres. */
+export type Transform =
+  | { kind: 'move'; by: Vec3 }
+  /** Degrees, counter-clockwise looking against the axis (right-hand rule). */
+  | { kind: 'rotate'; origin: Vec3; axis: Vec3; angle: number }
+  | { kind: 'mirror'; origin: Vec3; normal: Vec3 };
+
+/** Move, rotate or mirror a solid; with copies, the original stays and that
+ *  many copies are made, each one step further on (a mirror makes one). */
+export interface MoveFeature {
+  id: string;
+  type: 'move';
+  targetId: string;
+  transform: Transform;
+  copies: number;
+}
+
+/** The steps that are made from a shape (pull, spin, run), as opposed to ones that work on solids. */
+export type ShapeFeature = PullFeature | SpinFeature | RunFeature;
+export type SketchFeature = ShapeFeature | CombineFeature | MoveFeature;
+export const isShapeFeature = (f: SketchFeature): f is ShapeFeature => f.type === 'pull' || f.type === 'spin' || f.type === 'run';
 
 export interface SketchDoc {
   format: typeof SKETCH_FORMAT;
@@ -304,7 +334,7 @@ export const toWorld = (plane: SketchPlane, p: Vec2): Vec3 => {
 /** The shapes a pull has turned into solids (they are shown as solids, not lines). */
 /** The shapes steps have turned into solids (shown as solids, not lines): profiles, and the paths runs follow. */
 export const usedShapeIds = (doc: SketchDoc): Set<string> =>
-  new Set(doc.features.flatMap(f => (f.type === 'run' ? [f.shapeId, f.pathId] : [f.shapeId])));
+  new Set(doc.features.flatMap(f => (f.type === 'run' ? [f.shapeId, f.pathId] : isShapeFeature(f) ? [f.shapeId] : [])));
 
 export const canPull = (s: SketchShape): boolean => s.type === 'circle' || (s.closed && s.segments.length >= 2);
 
@@ -317,10 +347,12 @@ export type Recipe =
   | { op: 'pull'; fid: string; shape: SketchShape; distance: number }
   | { op: 'spin'; fid: string; shape: SketchShape; origin: Vec3; direction: Vec3; angle: number }
   | { op: 'run'; fid: string; shape: SketchShape; path: SketchShape }
-  | { op: 'join' | 'cut'; fid: string; a: Recipe; b: Recipe };
+  | { op: 'join' | 'cut'; fid: string; a: Recipe; b: Recipe }
+  /** The solid moved, turned or mirrored, `times` steps over (a copy n along is n steps). */
+  | { op: 'transform'; fid: string; of: Recipe; t: Transform; times: number };
 
 export interface PlannedSolid {
-  /** The id of the step that made it. */
+  /** The id of the step that made it (a copy's is the step's id, a colon and its number). */
   id: string;
   recipe: Recipe;
   /** Every step that went into it, in order. */
@@ -361,19 +393,61 @@ export const axisClearOfShape = (shape: SketchShape, axis: [Vec2, Vec2]): boolea
   return min >= -tol || max <= tol;
 };
 
+/** Why a step that works on solids cannot be applied: its solid was deleted. Such steps are tidied away. */
+export const SOLID_GONE = 'Its solid was deleted.';
+
+/** The id of the step behind a solid id (a copy's id is its step's id plus ":n"). */
+export const stepOfSolid = (solidId: string): string => solidId.replace(/:\d+$/, '');
+
 /** Works out the solids the steps make, in order. */
 export const planSolids = (doc: SketchDoc): SolidPlan => {
   const live = new Map<string, PlannedSolid>();
-  // Any step's id (or a solid's) → the solid it now belongs to.
+  // Any step's or solid's id → the solid it belonged to; a solid used up by a
+  // join or cut → the solid it went into.
   const owner = new Map<string, string>();
+  const merged = new Map<string, string>();
   const skipped = new Map<string, string>();
   const resolve = (id: string | undefined) => {
-    const s = id && owner.get(id);
+    let s = id ? owner.get(id) ?? id : undefined;
+    for (let guard = 0; s && !live.has(s) && merged.has(s) && guard < 1000; guard++) s = merged.get(s);
     return s && live.has(s) ? s : undefined;
   };
   const shapeOf = (id: string) => doc.shapes.find(s => s.id === id);
 
   for (const f of doc.features) {
+    if (f.type === 'combine') {
+      const t = resolve(f.targetId), u = resolve(f.toolId);
+      if (!t || !u) { skipped.set(f.id, SOLID_GONE); continue; }
+      if (t === u) { skipped.set(f.id, 'Both picks are the same solid.'); continue; }
+      const a = live.get(t)!, b = live.get(u)!;
+      a.recipe = { op: f.mode, fid: f.id, a: a.recipe, b: b.recipe };
+      a.featureIds.push(...b.featureIds, f.id);
+      a.pullIds.push(...b.pullIds);
+      live.delete(u);
+      merged.set(u, t);
+      owner.set(f.id, t);
+      continue;
+    }
+    if (f.type === 'move') {
+      const t = resolve(f.targetId);
+      if (!t) { skipped.set(f.id, SOLID_GONE); continue; }
+      const src = live.get(t)!;
+      const copies = f.transform.kind === 'mirror' ? Math.min(1, Math.max(0, Math.round(f.copies))) : Math.max(0, Math.round(f.copies));
+      if (copies === 0) {
+        src.recipe = { op: 'transform', fid: f.id, of: src.recipe, t: f.transform, times: 1 };
+        src.featureIds.push(f.id);
+        src.pullIds = []; // moved: no outline is where it was drawn any more
+        owner.set(f.id, t);
+      } else {
+        for (let n = 1; n <= copies; n++) {
+          const id = `${f.id}:${n}`;
+          live.set(id, { id, recipe: { op: 'transform', fid: f.id, of: src.recipe, t: f.transform, times: n }, featureIds: [f.id], pullIds: [] });
+          owner.set(id, id);
+        }
+        owner.set(f.id, `${f.id}:1`);
+      }
+      continue;
+    }
     const shape = shapeOf(f.shapeId);
     if (!shape) { skipped.set(f.id, 'Its shape was deleted.'); continue; }
     let piece: Recipe;
@@ -413,6 +487,18 @@ export const planSolids = (doc: SketchDoc): SolidPlan => {
   return { solids: [...live.values()], skipped };
 };
 
+/** Drops steps that work on solids whose solids have been deleted. */
+const tidySteps = (doc: SketchDoc): SketchDoc => {
+  for (let guard = 0; guard < 50; guard++) {
+    const { skipped } = planSolids(doc);
+    const orphans = doc.features.filter(f => !isShapeFeature(f) && skipped.get(f.id) === SOLID_GONE);
+    if (!orphans.length) return doc;
+    const ids = new Set(orphans.map(f => f.id));
+    doc = { ...doc, features: doc.features.filter(f => !ids.has(f.id)) };
+  }
+  return doc;
+};
+
 /** Inside a closed outline, or within `tol` of its edge. */
 const insideOrOn = (outline: Vec2[], p: Vec2, tol: number): boolean => {
   let inside = false;
@@ -446,7 +532,7 @@ const withDependents = (doc: SketchDoc, shapeIds: Iterable<string>): Set<string>
   const out = new Set(shapeIds);
   for (let grew = true; grew;) {
     grew = false;
-    const pulls = new Set(doc.features.filter(f => out.has(f.shapeId) || (f.type === 'run' && out.has(f.pathId))).map(f => f.id));
+    const pulls = new Set(doc.features.filter(f => isShapeFeature(f) && (out.has(f.shapeId) || (f.type === 'run' && out.has(f.pathId)))).map(f => f.id));
     for (const s of doc.shapes) {
       if (s.onFeatureId && pulls.has(s.onFeatureId) && !out.has(s.id)) { out.add(s.id); grew = true; }
     }
@@ -457,18 +543,18 @@ const withDependents = (doc: SketchDoc, shapeIds: Iterable<string>): Set<string>
 /** Removes a shape, the steps made from it (a run along it too), and whatever was drawn on their faces. */
 export const removeShape = (doc: SketchDoc, shapeId: string): SketchDoc => {
   const gone = withDependents(doc, [shapeId]);
-  return {
+  return tidySteps({
     ...doc,
     shapes: doc.shapes.filter(s => !gone.has(s.id)),
-    features: doc.features.filter(f => !gone.has(f.shapeId) && !(f.type === 'run' && gone.has(f.pathId))),
-  };
+    features: doc.features.filter(f => !isShapeFeature(f) || (!gone.has(f.shapeId) && !(f.type === 'run' && gone.has(f.pathId)))),
+  });
 };
 
 /** Removes one step, leaving its shape (as an outline again), and whatever was drawn on its faces. */
 export const removeFeature = (doc: SketchDoc, featureId: string): SketchDoc => {
   let next: SketchDoc = { ...doc, features: doc.features.filter(f => f.id !== featureId) };
   for (const s of doc.shapes) if (s.onFeatureId === featureId && next.shapes.some(x => x.id === s.id)) next = removeShape(next, s.id);
-  return next;
+  return tidySteps(next);
 };
 
 /** Changes how far a pull goes. Shapes drawn on the end it moves, and
@@ -492,10 +578,11 @@ export const setPullDistance = (doc: SketchDoc, featureId: string, distance: num
   return { ...doc, shapes, features };
 };
 
-/** The steps that made pieces of a solid (pulls, spins and runs), in order, as built (a run's profile where it was moved to). */
-export type RecipePiece = Exclude<Recipe, { op: 'join' | 'cut' }>;
+/** The steps that made pieces of a solid (pulls, spins and runs), in order, as built (a run's profile where it
+ *  was moved to). Pieces of a solid that has since been moved are left out: they are no longer where they were made. */
+export type RecipePiece = Exclude<Recipe, { op: 'join' | 'cut' | 'transform' }>;
 export const recipePieces = (r: Recipe): RecipePiece[] =>
-  'a' in r ? [...recipePieces(r.a), ...recipePieces(r.b)] : [r];
+  r.op === 'transform' ? [] : 'a' in r ? [...recipePieces(r.a), ...recipePieces(r.b)] : [r];
 
 /** A shape in a few words, for the step list: "Rectangle 6" × 4"", "Circle Ø 3"", "Shape, 7 sides". */
 export const describeShape = (s: SketchShape, units: SketchUnits): string => {
@@ -509,4 +596,48 @@ export const describeShape = (s: SketchShape, units: SketchUnits): string => {
   }
   const n = s.segments.length;
   return s.closed ? `Shape, ${n} sides` : `Path, ${n} ${n === 1 ? 'piece' : 'pieces'}`;
+};
+
+/** A transform as a 4×4 matrix (column-major, as three.js keeps them), applied `times` over. */
+export const transformMatrix = (t: Transform, times = 1): number[] => {
+  if (t.kind === 'move') {
+    const [x, y, z] = t.by.map(v => v * times);
+    return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1];
+  }
+  if (t.kind === 'mirror') {
+    const l = Math.hypot(...t.normal) || 1;
+    const n = t.normal.map(v => v / l);
+    const d = dot(n as Vec3, t.origin);
+    // x' = x − 2 (x·n − d) n
+    const m = (i: number, j: number) => (i === j ? 1 : 0) - 2 * n[i] * n[j];
+    return [m(0, 0), m(1, 0), m(2, 0), 0, m(0, 1), m(1, 1), m(2, 1), 0, m(0, 2), m(1, 2), m(2, 2), 0, 2 * d * n[0], 2 * d * n[1], 2 * d * n[2], 1];
+  }
+  const l = Math.hypot(...t.axis) || 1;
+  const [x, y, z] = t.axis.map(v => v / l);
+  const a = (t.angle * times * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), k = 1 - c;
+  const r = [
+    [c + x * x * k, x * y * k - z * s, x * z * k + y * s],
+    [y * x * k + z * s, c + y * y * k, y * z * k - x * s],
+    [z * x * k - y * s, z * y * k + x * s, c + z * z * k],
+  ];
+  const o = t.origin;
+  const tr = [0, 1, 2].map(i => o[i] - (r[i][0] * o[0] + r[i][1] * o[1] + r[i][2] * o[2]));
+  return [r[0][0], r[1][0], r[2][0], 0, r[0][1], r[1][1], r[2][1], 0, r[0][2], r[1][2], r[2][2], 0, tr[0], tr[1], tr[2], 1];
+};
+
+/** A world point moved by a transform. */
+export const applyTransform = (t: Transform, p: Vec3, times = 1): Vec3 => {
+  const m = transformMatrix(t, times);
+  return [0, 1, 2].map(i => m[i] * p[0] + m[4 + i] * p[1] + m[8 + i] * p[2] + m[12 + i]) as Vec3;
+};
+
+/** The pulls that cut into the solid they were drawn on (as opposed to joining it, or starting one). */
+export const cuttingPulls = (r: Recipe, out = new Set<string>()): Set<string> => {
+  if (r.op === 'transform') cuttingPulls(r.of, out);
+  else if (r.op === 'join' || r.op === 'cut') {
+    if (r.op === 'cut' && r.b.op === 'pull' && r.b.fid === r.fid) out.add(r.fid);
+    cuttingPulls(r.a, out);
+    cuttingPulls(r.b, out);
+  }
+  return out;
 };

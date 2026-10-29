@@ -9,7 +9,7 @@ import opencascade from 'replicad-opencascadejs';
 // @ts-ignore — Vite turns ?url imports into the emitted asset's URL
 import wasmUrl from 'replicad-opencascadejs/wasm?url';
 import { setOC, draw, drawCircle, genericSweep, Plane, type Drawing } from 'replicad';
-import { frameOf, planSolids, type Recipe, type SketchDoc, type SketchShape, type Vec3 } from './sketchModel';
+import { frameOf, planSolids, type Recipe, type SketchDoc, type SketchShape, type Transform, type Vec3 } from './sketchModel';
 import type { BuildRequest, BuildResponse, SolidMesh } from './geometryTypes';
 
 let engine: Promise<void> | null = null;
@@ -33,6 +33,9 @@ interface SolidLike {
   fuse(other: SolidLike): SolidLike;
   cut(tool: SolidLike): SolidLike;
   clone(): SolidLike;
+  translate(v: Vec3): SolidLike;
+  rotate(angle: number, origin: Vec3, axis: Vec3): SolidLike;
+  mirror(normal: Vec3, origin: Vec3): SolidLike;
   mesh(o: { tolerance: number; angularTolerance: number }): {
     vertices: number[]; normals: number[]; triangles: number[]; faceGroups: { start: number; count: number }[];
   };
@@ -66,10 +69,39 @@ const pathDrawingFor = (s: SketchShape): Drawing => {
 type Errors = BuildResponse['errors'];
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// Within one build, the solid a move or copy starts from is made once and
+// cloned after that (a solid and its copies share it).
+let made = new Map<string, SolidLike>();
+const shared = (r: Recipe, errors: Errors): SolidLike | null => {
+  const key = JSON.stringify(r);
+  const hit = made.get(key);
+  if (hit) return hit.clone();
+  const out = make(r, errors);
+  if (out) made.set(key, out.clone());
+  return out;
+};
+
+const transformed = (s: SolidLike, t: Transform, times: number): SolidLike => {
+  if (t.kind === 'move') return s.translate([t.by[0] * times, t.by[1] * times, t.by[2] * times]);
+  if (t.kind === 'rotate') return s.rotate(t.angle * times, t.origin, t.axis);
+  return s.mirror(t.normal, t.origin);
+};
+
 /** Builds a recipe into a new OpenCascade solid (the caller deletes it), or null when it cannot be built. */
 const make = (r: Recipe, errors: Errors): SolidLike | null => {
   try {
     switch (r.op) {
+      case 'transform': {
+        const s = shared(r.of, errors);
+        if (!s) return null;
+        try {
+          return transformed(s, r.t, r.times); // replicad deletes the original
+        } catch (e) {
+          errors.push({ featureId: r.fid, message: message(e) });
+          s.delete();
+          return null;
+        }
+      }
       case 'pull':
         return sketchOf(r.shape).extrude(r.distance);
       case 'spin':
@@ -144,10 +176,15 @@ const build = (doc: SketchDoc): Omit<BuildResponse, 'requestId'> => {
   const plan = planSolids(doc);
   const solids: SolidMesh[] = [];
   const errors: Errors = [];
-  for (const planned of plan.solids) {
-    const built = buildSolid(planned.recipe);
-    errors.push(...built.errors);
-    if (built.mesh) solids.push({ solidId: planned.id, featureIds: planned.featureIds, pullIds: planned.pullIds, ...built.mesh });
+  try {
+    for (const planned of plan.solids) {
+      const built = buildSolid(planned.recipe);
+      errors.push(...built.errors);
+      if (built.mesh) solids.push({ solidId: planned.id, featureIds: planned.featureIds, pullIds: planned.pullIds, ...built.mesh });
+    }
+  } finally {
+    for (const s of made.values()) s.delete();
+    made = new Map();
   }
   return { solids, errors };
 };

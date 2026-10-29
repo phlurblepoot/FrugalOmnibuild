@@ -9,8 +9,8 @@ import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } 
 import { Link, useBlocker } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  ArrowLeft, ArrowUpFromLine, Box, Circle, Eye, EyeOff, ListOrdered, LoaderCircle, Magnet, Maximize, MousePointer2, PenLine,
-  RectangleHorizontal, Redo2, Rotate3d, Route, Save, Spline, Trash2, TriangleRight, Undo2,
+  ArrowLeft, ArrowUpFromLine, Box, Circle, Combine, Eye, EyeOff, FlipHorizontal2, ListOrdered, LoaderCircle, Magnet, Maximize,
+  MousePointer2, Move, PenLine, RectangleHorizontal, Redo2, Rotate3d, RotateCw, Route, Save, Spline, Trash2, TriangleRight, Undo2,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
@@ -19,10 +19,11 @@ import { useCollaboration } from '../../context/CollaborationContext';
 import { useCollabEditing } from '../../hooks/useCollabEditing';
 import { fetchFileBlob, getFileMeta, getProjectSummary, saveFileVersion, type ProjectFile } from '../../utils/store';
 import {
-  PLANE_LABELS, SKETCH_MIME, axisClearOfShape, canPull, faceFrame, formatLength, parseLength, parseSketch, planSolids,
-  pullAtPoint, removeShape, samePlane, samePlaneSurface, serializeSketch, setPullDistance, shapeOutline, shapeSnapPoints,
-  toPlane, toWorld, usedShapeIds, type PlaneId, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits,
-  type SolidPlan, type Vec2,
+  PLANE_LABELS, SKETCH_MIME, axisClearOfShape, canPull, faceFrame, formatLength, frameOf, isShapeFeature, parseLength,
+  parseSketch, planSolids, pullAtPoint, removeFeature, removeShape, samePlane, samePlaneSurface, serializeSketch,
+  setPullDistance, shapeOutline, shapeSnapPoints, stepOfSolid, toPlane, toWorld, transformMatrix, usedShapeIds,
+  type PlaneId, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Transform,
+  type Vec2, type Vec3,
 } from './sketchModel';
 import {
   angleDeg, angleFromLevel, gridStep, levelAngleToward, parseAngle, pointAt, snapPoint, type SnapTargets,
@@ -52,8 +53,14 @@ const TOOL_HINTS: Record<ToolId, string> = {
   pull: 'Click a closed shape (or a solid to change it), move to pull it out, then click or type the distance. A shape drawn on a face joins the solid when pulled out and cuts it when pulled in.',
   spin: 'Click a closed shape to spin, then two points on the line to spin it round (in its plane, to one side of it). Type an angle for less than a full turn.',
   run: 'Click the profile (a closed shape), then the path to run it along. Draw the profile across the path, where the path starts; corners are mitred.',
+  combine: 'Click a solid, then a second one to join to it (or, set to Cut, to cut away from it).',
+  move: 'Click a solid, then the point to move it from and the point to move it to (or type how far). Copies leaves it where it is and makes that many.',
+  rotate: 'Click a solid, then the point to turn it round (on the plane you draw on), then click or type the angle. Copies leaves it and makes that many.',
+  mirror: 'Click a solid, then two points on the mirror line (on the plane you draw on).',
 };
+const SOLID_TOOLS: ToolId[] = ['combine', 'move', 'rotate', 'mirror'];
 const EMPTY_PLAN: SolidPlan = { solids: [], skipped: new Map() };
+type ScenePreviewAngle = { plane: SketchPlane; at: Vec2; levelDeg: number; dirDeg: number; text: string } | null;
 const FACE_PICK_HINT = 'Click a flat face of a solid to draw on it.';
 const ANGLE_STEP_DEG = 15;
 const PERSPECTIVE_KEY = 'sketch-perspective';
@@ -115,12 +122,18 @@ const useDark = () => {
 
 type Selection = { shapeId: string } | { featureId: string } | null;
 
-/** What the pointer picked, as a selection: a solid resolves to the pull that made the face that was hit. */
+/** What the pointer picked, as a selection: a solid resolves to the pull that made the face that was hit
+ *  (or, failing that, the step that made the solid). */
 const selectionOf = (doc: SketchDoc, picked: Pick): Selection => {
   if (!picked) return null;
   if ('shapeId' in picked) return picked;
-  return { featureId: pullAtPoint(doc, picked.solid.pullIds, picked.solid.point) ?? picked.solid.solidId };
+  return { featureId: pullAtPoint(doc, picked.solid.pullIds, picked.solid.point) ?? stepOfSolid(picked.solid.solidId) };
 };
+
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+/** Degrees in (−180, 180]: 330 reads as −30. */
+const signedDeg = (d: number) => (d > 180 ? d - 360 : d);
 
 export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const { toast } = useToast();
@@ -207,6 +220,10 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   const [perspective, setPerspectiveState] = useState(readPerspective);
   // Tablet stand-ins for holding Shift (line up with what is drawn) and Ctrl (lock angles).
   const [snapShapes, setSnapShapes] = useState(false);
+  // Join or cut (Join/Cut tool), how many copies (Move, Rotate), and whether a mirror keeps the original.
+  const [combineMode, setCombineMode] = useState<'join' | 'cut'>('join');
+  const [copiesText, setCopiesText] = useState('0');
+  const [mirrorKeep, setMirrorKeep] = useState(true);
   // The step list starts open on wide screens.
   const [showSteps, setShowSteps] = useState(() => window.matchMedia('(min-width: 1280px)').matches);
   const [lockAngles, setLockAngles] = useState(false);
@@ -257,6 +274,9 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     scene.setUnits(doc.units);
     scene.setContent({
       doc, plan, solids, showDims,
+      // The solid a Join/Cut, Move, Rotate or Mirror is working on.
+      activeSolidId: draft?.tool === 'combine' ? draft.targetId
+        : draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror' ? draft.solidId : null,
       selectedShapeId: selection && 'shapeId' in selection ? selection.shapeId : null,
       selectedFeatureId: selection && 'featureId' in selection ? selection.featureId : null,
     });
@@ -265,12 +285,13 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       fitted.current = true;
       scene.fit(doc, solids);
     }
-  }, [doc, plan, solids, selection, showDims]);
+  }, [doc, plan, solids, selection, showDims, draft]);
   useEffect(() => { sceneRef.current?.setWorkPlane(plane); }, [plane]);
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull') || draft?.tool === 'spin');
+    const drawing = editable && !facePick && (isDrawTool(tool) || (tool === 'pull' && draft?.tool === 'pull') || draft?.tool === 'spin'
+      || draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror');
     scene.setNavigation(drawing ? 'draw' : 'navigate');
   }, [tool, draft, view, editable, facePick]);
 
@@ -287,9 +308,12 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     setToolState(t);
     if (isDrawTool(t)) setView(viewForPlane(plane));
     if (t !== 'select') setSelection(null);
-    // A shape picked before choosing Spin or Run is the one to spin or run.
+    // A shape picked before choosing Spin or Run is the one to spin or run;
+    // a solid picked before Join/Cut, Move, Rotate or Mirror is the one it works on.
     if (preselected && t === 'spin') startSpin(preselected);
     if (preselected && t === 'run') startRun(preselected);
+    const solid = SOLID_TOOLS.includes(t) ? selectedSolid() : null;
+    if (solid) startSolidTool(t, solid);
   };
 
   const setPlane = (p: PlaneId) => {
@@ -373,24 +397,26 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (!raw) return null;
     const pxPerMm = scene.pxPerMm();
     const from = draft?.tool === 'line' ? draftLastPoint(draft) : draft?.tool === 'rect' ? draft.a : draft?.tool === 'circle' ? draft.center
-      : draft?.tool === 'spin' ? draft.a : undefined;
-    const lock = ((draft?.tool === 'line' && !draft.arcThrough) || (draft?.tool === 'spin' && !!draft.a)) && (mods.current.ctrl || lockAngles);
+      : draft?.tool === 'spin' || draft?.tool === 'mirror' ? draft.a : draft?.tool === 'move' ? draft.from : draft?.tool === 'rotate' ? draft.pivot : undefined;
+    const lock = ((draft?.tool === 'line' && !draft.arcThrough) || (draft?.tool !== 'line' && draft?.tool !== 'rect' && draft?.tool !== 'circle' && !!from))
+      && (mods.current.ctrl || lockAngles);
     return snapPoint({
       raw, pxPerMm, step: gridStep(doc.units, pxPerMm), targets: snapTargets, from,
       free: mods.current.alt, shapes: mods.current.shift || snapShapes, angleStep: lock ? ANGLE_STEP_DEG : null,
     });
   };
 
-  /** Where the typed sizes put the next point (line), the other corner (rectangle) or the edge
-   *  (circle), using the pointer for what is not typed; null when nothing usable is typed. */
+  /** Where the typed sizes put the next point (line, move), the other corner (rectangle) or the
+   *  edge (circle), using the pointer for what is not typed; null when nothing usable is typed. */
   const typedPoint = (d: Draft | null): Vec2 | null => {
-    if (!doc || !d || d.tool === 'pull' || d.tool === 'spin' || d.tool === 'run') return null;
+    if (!doc || !d) return null;
     const units = doc.units;
     const ptr = hover.current;
     const [a, b] = typed;
-    if (d.tool === 'line') {
-      if (d.arcThrough) return null;
-      const last = draftLastPoint(d);
+    if (d.tool === 'line' || d.tool === 'move') {
+      if (d.tool === 'line' && d.arcThrough) return null;
+      const last = d.tool === 'line' ? draftLastPoint(d) : d.from;
+      if (!last) return null;
       const toward = ptr ? { x: ptr.x - last.x, y: ptr.y - last.y } : { x: 1, y: 0 };
       const len = parseLength(a, units);
       const ang = b.trim() ? parseAngle(b) : null;
@@ -407,6 +433,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       }
       return null;
     }
+    if (d.tool !== 'rect' && d.tool !== 'circle') return null;
     if (d.tool === 'rect') {
       const w = parseLength(a, units), h = parseLength(b, units);
       if (!w && !h) return null;
@@ -431,6 +458,34 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
   /** Whether pulling this shape this far cuts into the solid it was drawn on. */
   const cuts = (shape: SketchShape, distance: number) =>
     distance < 0 && !!shape.onFeatureId && !!doc?.features.some(f => f.id === shape.onFeatureId);
+
+  const copies = () => Math.max(0, Math.min(100, parseInt(copiesText, 10) || 0));
+
+  /** The move, turn or mirror the pointer (or the typed sizes) give, on the plane being drawn on. */
+  const draftTransform = (d: Draft | null, at: Vec2 | null): Transform | null => {
+    if (!d || !at) return null;
+    if (d.tool === 'move' && d.from) {
+      const to = typedPoint(d) ?? at;
+      const by = sub(toWorld(plane, to), toWorld(plane, d.from));
+      return Math.hypot(...by) > 1e-6 ? { kind: 'move', by } : null;
+    }
+    if (d.tool === 'rotate' && d.pivot) {
+      const typedAngle = typed[0].trim() ? parseAngle(typed[0]) : null;
+      const angle = typedAngle ?? (Math.hypot(at.x - d.pivot.x, at.y - d.pivot.y) > 1e-6 ? signedDeg(angleDeg(d.pivot, at)) : 0);
+      return angle ? { kind: 'rotate', origin: toWorld(plane, d.pivot), axis: frameOf(plane).normal, angle } : null;
+    }
+    if (d.tool === 'mirror' && d.a) {
+      const dir = sub(toWorld(plane, at), toWorld(plane, d.a));
+      const n = cross3(dir, frameOf(plane).normal);
+      const l = Math.hypot(...n);
+      return l > 1e-9 ? { kind: 'mirror', origin: toWorld(plane, d.a), normal: [n[0] / l, n[1] / l, n[2] / l] } : null;
+    }
+    return null;
+  };
+
+  /** The places a transform puts a solid: one, or one per copy. */
+  const ghostMatrices = (t: Transform) =>
+    t.kind === 'mirror' ? [transformMatrix(t)] : Array.from({ length: Math.max(1, copies()) }, (_, i) => transformMatrix(t, i + 1));
 
   const pullShape = (d: Draft | null): SketchShape | undefined =>
     d?.tool === 'pull' ? doc?.shapes.find(s => s.id === d.shapeId) : undefined;
@@ -477,6 +532,33 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
         snap: { p: snapped.p, plane, kind: snapped.kind, guides: snapped.guides },
         spin: draft.a ? { shape, axis: [draft.a, snapped.p], angle: Number.isFinite(typedAngle) && typedAngle !== 0 ? typedAngle : 360 } : null,
       });
+      return;
+    }
+    if (draft?.tool === 'move' || draft?.tool === 'rotate' || draft?.tool === 'mirror') {
+      const snapped = ptr ? snappedAt(ptr.x, ptr.y) : null;
+      if (snapped) hover.current = snapped.p;
+      const at = snapped?.p ?? hover.current;
+      const base = draft.tool === 'move' ? draft.from : draft.tool === 'rotate' ? draft.pivot : draft.a;
+      const snap = snapped ? { p: snapped.p, plane, kind: snapped.kind, guides: snapped.guides } : null;
+      if (!base || !at) { scene.setPreview({ ...none, snap }); return; }
+      const t = draftTransform(draft, at);
+      const ghost = t ? { solidId: draft.solidId, matrices: ghostMatrices(t) } : null;
+      let readout: { at: Vec3; text: string } | null = null;
+      let angle: ScenePreviewAngle = null;
+      let line: { plane: SketchPlane; a: Vec2; b: Vec2; extend?: boolean } | null = null;
+      if (t?.kind === 'move') {
+        const to = typedPoint(draft) ?? at;
+        const fromLevel = Math.round(angleFromLevel(base, to) * 10) / 10;
+        readout = { at: toWorld(plane, to), text: `${formatLength(Math.hypot(...t.by), units)}  ${fromLevel}°` };
+        angle = { plane, at: base, levelDeg: to.x < base.x - 1e-9 ? 180 : 0, dirDeg: angleDeg(base, to), text: `${fromLevel}°` };
+        line = { plane, a: base, b: to };
+      } else if (t?.kind === 'rotate') {
+        readout = { at: toWorld(plane, at), text: `${Math.round(t.angle * 10) / 10}°` };
+        angle = { plane, at: base, levelDeg: 0, dirDeg: (t.angle + 360) % 360, text: `${Math.round(t.angle * 10) / 10}°` };
+      } else if (t?.kind === 'mirror') {
+        line = { plane, a: base, b: at, extend: true };
+      }
+      scene.setPreview({ ...none, snap, readout, angle, line, ghost });
       return;
     }
     if (!isDrawTool(tool)) { scene.setPreview(none); return; }
@@ -553,7 +635,7 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if ('featureId' in picked) {
       const f = doc.features.find(ff => ff.id === picked.featureId);
       if (!f) return;
-      if (f.type !== 'pull') { toast(`Change a ${f.type === 'spin' ? 'spin' : 'run'} in the step list.`, { type: 'info' }); return; }
+      if (f.type !== 'pull') { toast('Change that step in the step list.', { type: 'info' }); return; }
       pullDistance.current = f.distance;
       setDraft({ tool: 'pull', shapeId: f.shapeId, featureId: f.id, distance: f.distance });
       return;
@@ -623,6 +705,35 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     if (sceneRef.current?.currentView !== 'iso') setView('iso');
   };
 
+  /** The solid a pick landed on, or (failing a pick) the one the current selection picks out. */
+  const solidAt = (clientX: number, clientY: number): string | null => {
+    const picked = sceneRef.current?.pick(clientX, clientY, 'solids');
+    return picked && 'solid' in picked ? picked.solid.solidId : null;
+  };
+  const selectedSolid = (): string | null => {
+    if (!selection || !('featureId' in selection)) return null;
+    const holding = plan.solids.filter(sol => sol.featureIds.includes(selection.featureId));
+    return holding.length === 1 ? holding[0].id : null;
+  };
+
+  const startSolidTool = (t: ToolId, solidId: string) => {
+    if (t === 'combine') setDraft({ tool: 'combine', targetId: solidId });
+    else if (t === 'move') setDraft({ tool: 'move', solidId });
+    else if (t === 'rotate') setDraft({ tool: 'rotate', solidId });
+    else if (t === 'mirror') setDraft({ tool: 'mirror', solidId });
+    setSelection(null);
+  };
+
+  const commitTransform = (d: Extract<Draft, { tool: 'move' | 'rotate' | 'mirror' }>, t: Transform) => {
+    if (!doc) return;
+    const id = uuidv4();
+    const n = t.kind === 'mirror' ? (mirrorKeep ? 1 : 0) : copies();
+    commitDoc({ ...doc, features: [...doc.features, { id, type: 'move', targetId: d.solidId, transform: t, copies: n }] });
+    setDraft(null);
+    setTyped(['', '']);
+    setSelection(null);
+  };
+
   const handleClick = (clientX: number, clientY: number) => {
     const scene = sceneRef.current;
     if (!scene || !doc) return;
@@ -648,6 +759,33 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       const picked = selectionOf(doc, scene.pick(clientX, clientY));
       if (draft?.tool !== 'run') startRun(picked);
       else commitRun(draft, picked);
+      return;
+    }
+    if (SOLID_TOOLS.includes(tool)) {
+      if (!draft || draft.tool !== tool) {
+        const solidId = solidAt(clientX, clientY);
+        if (solidId) startSolidTool(tool, solidId);
+        else toast('Click a solid.', { type: 'info' });
+        return;
+      }
+      if (draft.tool === 'combine') {
+        const other = solidAt(clientX, clientY);
+        if (!other) { toast('Click the second solid.', { type: 'info' }); return; }
+        if (other === draft.targetId) { toast('Click a different solid.', { type: 'info' }); return; }
+        const id = uuidv4();
+        commitDoc({ ...doc, features: [...doc.features, { id, type: 'combine', mode: combineMode, targetId: draft.targetId, toolId: other }] });
+        setDraft(null);
+        setSelection(null);
+        return;
+      }
+      const snapped = snappedAt(clientX, clientY);
+      if (!snapped) return;
+      if (draft.tool === 'move' && !draft.from) { setDraft({ ...draft, from: snapped.p }); return; }
+      if (draft.tool === 'rotate' && !draft.pivot) { setDraft({ ...draft, pivot: snapped.p }); return; }
+      if (draft.tool === 'mirror' && !draft.a) { setDraft({ ...draft, a: snapped.p }); return; }
+      if (draft.tool !== 'move' && draft.tool !== 'rotate' && draft.tool !== 'mirror') return;
+      const t = draftTransform(draft, snapped.p);
+      if (t) commitTransform(draft, t);
       return;
     }
     const snapped = snappedAt(clientX, clientY);
@@ -690,15 +828,25 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     } else if (d?.tool === 'spin') {
       if (!d.a || !hover.current) return toast('Click two points on the axis to spin round.', { type: 'info' });
       commitSpin(d, hover.current);
+    } else if (d?.tool === 'move' || d?.tool === 'rotate') {
+      if (d.tool === 'rotate' && typed[0].trim() && parseAngle(typed[0]) === null) return toast('Type the angle in degrees, e.g. 90.', { type: 'warning' });
+      const t = draftTransform(d, hover.current);
+      if (!t) return toast(d.tool === 'move' ? 'Click where to move it from, then type how far.' : 'Click the point to turn round, then type the angle.', { type: 'info' });
+      commitTransform(d, t);
     }
   };
 
   const deleteSelection = () => {
     if (!doc || !selection) return;
-    const shapeId = 'shapeId' in selection ? selection.shapeId : doc.features.find(f => f.id === selection.featureId)?.shapeId;
-    if (!shapeId) return;
-    // Whatever was drawn on its faces goes with it.
-    commitDoc(removeShape(doc, shapeId));
+    if ('featureId' in selection) {
+      const f = doc.features.find(ff => ff.id === selection.featureId);
+      if (!f) return;
+      // A solid made from a shape goes with its shape (and whatever was drawn on its faces);
+      // a join, cut, move or copy is undone by deleting its step.
+      commitDoc(isShapeFeature(f) ? removeShape(doc, f.shapeId) : removeFeature(doc, f.id));
+    } else {
+      commitDoc(removeShape(doc, selection.shapeId));
+    }
     setSelection(null);
   };
 
@@ -776,6 +924,10 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
       case 'p': case 'P': setTool('pull'); break;
       case 's': case 'S': setTool('spin'); break;
       case 'f': case 'F': setTool('run'); break;
+      case 'j': case 'J': setTool('combine'); break;
+      case 'm': case 'M': setTool('move'); break;
+      case 't': case 'T': setTool('rotate'); break;
+      case 'i': case 'I': setTool('mirror'); break;
       default: return;
     }
     e.preventDefault();
@@ -875,9 +1027,15 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
     : draft?.tool === 'circle' ? [{ label: 'Radius', placeholder: units === 'metric' ? '50' : '2' }]
     : draft?.tool === 'pull' ? [{ label: 'Distance', placeholder: units === 'metric' ? '300' : `1'` }]
     : draft?.tool === 'spin' ? [{ label: 'Angle °', placeholder: '360' }]
+    : draft?.tool === 'move' && draft.from ? [{ label: 'Length', placeholder: units === 'metric' ? '250' : `1' 4 1/2"` }, { label: 'Angle °', placeholder: 'from level' }]
+    : draft?.tool === 'rotate' && draft.pivot ? [{ label: 'Angle °', placeholder: '90' }]
     : [];
   const draftHint = draft?.tool === 'spin' ? (draft.a ? 'Click the second point of the axis.' : 'Click the first point of the line to spin round.')
     : draft?.tool === 'run' ? 'Now click the path to run it along.'
+    : draft?.tool === 'combine' ? (combineMode === 'join' ? 'Now click the solid to join to it.' : 'Now click the solid to cut away from it.')
+    : draft?.tool === 'move' ? (draft.from ? 'Click where it goes, or type how far.' : 'Click the point to move it from.')
+    : draft?.tool === 'rotate' ? (draft.pivot ? 'Click or type the angle (counter-clockwise).' : 'Click the point to turn it round.')
+    : draft?.tool === 'mirror' ? (draft.a ? 'Click the second point of the mirror line.' : 'Click the first point of the mirror line.')
     : null;
 
   const toolButton = (t: ToolId, label: string, icon: React.ReactNode, key: string) => (
@@ -960,6 +1118,11 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
             {toolButton('pull', 'Pull into 3D', <ArrowUpFromLine size={18} />, 'P')}
             {toolButton('spin', 'Spin round a line', <Rotate3d size={18} />, 'S')}
             {toolButton('run', 'Run along a path', <Route size={18} />, 'F')}
+            <div className="my-1 h-px w-8 bg-edge" />
+            {toolButton('combine', 'Join or cut solids', <Combine size={18} />, 'J')}
+            {toolButton('move', 'Move or copy', <Move size={18} />, 'M')}
+            {toolButton('rotate', 'Rotate or copy round', <RotateCw size={18} />, 'T')}
+            {toolButton('mirror', 'Mirror', <FlipHorizontal2 size={18} />, 'I')}
             <div className="my-1 h-px w-8 bg-edge" />
             <button
               type="button"
@@ -1111,6 +1274,29 @@ export const SketchEditor: React.FC<{ fileId: string }> = ({ fileId }) => {
                   <span className="text-xs text-ink-soft">{facePick ? FACE_PICK_HINT : draftHint ?? TOOL_HINTS[tool]}</span>
                 )}
                 {typedFields.length > 0 && draftHint && <span className="text-xs text-ink-faint">{draftHint}</span>}
+                {tool === 'combine' && (
+                  <span className="flex items-center gap-0.5 rounded-md border border-edge p-0.5 text-xs">
+                    {(['join', 'cut'] as const).map(m => (
+                      <button key={m} type="button" data-testid={`sketch-combine-${m}`} onClick={() => setCombineMode(m)} aria-pressed={combineMode === m}
+                        className={`rounded px-2 py-0.5 font-medium ${combineMode === m ? 'bg-accent-600 text-white' : 'text-ink-soft hover:bg-hover'}`}>
+                        {m === 'join' ? 'Join' : 'Cut'}
+                      </button>
+                    ))}
+                  </span>
+                )}
+                {(tool === 'move' || tool === 'rotate') && (
+                  <label className="flex items-center gap-1.5 text-xs text-ink-soft" title="0 moves the solid itself; more leaves it and makes that many copies, each one step further on">
+                    Copies
+                    <input value={copiesText} onChange={e => setCopiesText(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" data-testid="sketch-copies"
+                      className="w-12 rounded-md border border-edge bg-raised px-2 py-1 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent-500" />
+                  </label>
+                )}
+                {tool === 'mirror' && (
+                  <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+                    <input type="checkbox" checked={mirrorKeep} onChange={e => setMirrorKeep(e.target.checked)} data-testid="sketch-mirror-keep" />
+                    Keep the original
+                  </label>
+                )}
                 {draft?.tool === 'line' && (
                   <span className="text-xs text-ink-faint">{draft.arcThrough ? 'Click where the arc ends.' : arcMode ? 'Arc: click a point on the curve.' : ''}</span>
                 )}

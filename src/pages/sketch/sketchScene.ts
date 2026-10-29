@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {
-  arcPoints, circleThrough, formatLength, frameOf, recipePieces, shapeOutline, toWorld, usedShapeIds,
+  arcPoints, circleThrough, cuttingPulls, formatLength, frameOf, recipePieces, shapeOutline, toWorld, usedShapeIds,
   type RecipePiece, type SketchDoc, type SketchPlane, type SketchShape, type SketchUnits, type SolidPlan, type Vec2, type Vec3,
 } from './sketchModel';
 import { gridStep, majorEvery, type SnapKind } from './sketchSnap';
@@ -42,6 +42,8 @@ export interface SceneContent {
   solids: SolidMesh[];
   selectedShapeId: string | null;
   selectedFeatureId: string | null;
+  /** A solid a tool is working on, shown as picked. */
+  activeSolidId?: string | null;
   showDims: boolean;
 }
 
@@ -59,6 +61,11 @@ export interface ScenePreview {
   angle?: { plane: SketchPlane; at: Vec2; levelDeg: number; dirDeg: number; text: string } | null;
   /** A spin being set up: the shape, its axis (one point, or both), and how far round. */
   spin?: { shape: SketchShape; axis: [Vec2, Vec2 | null]; angle: number } | null;
+  /** A solid being moved, turned or mirrored: see-through copies of it at each place it will go
+   *  (4×4 column-major matrices). */
+  ghost?: { solidId: string; matrices: number[][] } | null;
+  /** A dashed line on a plane: a move's direction, or (extended both ways) a mirror line. */
+  line?: { plane: SketchPlane; a: Vec2; b: Vec2; extend?: boolean } | null;
 }
 
 /** A solid under the pointer: which one, where, and the face it was hit on. */
@@ -416,9 +423,10 @@ export class SketchScene {
     this.units = c.doc.units;
     const used = usedShapeIds(c.doc);
     const t = this.theme;
-    const pieces = new Map<string, { piece: RecipePiece; first: boolean }>();
+    const pieces = new Map<string, { piece: RecipePiece; cut: boolean }>();
     for (const planned of c.plan.solids) {
-      recipePieces(planned.recipe).forEach((piece, i) => pieces.set(piece.fid, { piece, first: i === 0 }));
+      const cutting = cuttingPulls(planned.recipe);
+      for (const piece of recipePieces(planned.recipe)) pieces.set(piece.fid, { piece, cut: cutting.has(piece.fid) });
     }
 
     for (const s of c.doc.shapes) {
@@ -445,7 +453,7 @@ export class SketchScene {
       g.setAttribute('position', new THREE.BufferAttribute(solid.positions, 3));
       g.setAttribute('normal', new THREE.BufferAttribute(solid.normals, 3));
       g.setIndex(new THREE.BufferAttribute(solid.indices, 1));
-      const selected = !!c.selectedFeatureId && solid.featureIds.includes(c.selectedFeatureId);
+      const selected = (!!c.selectedFeatureId && solid.featureIds.includes(c.selectedFeatureId)) || solid.solidId === c.activeSolidId;
       const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
         color: t.solid, emissive: selected ? t.selected : 0x000000, emissiveIntensity: selected ? 0.18 : 0,
         roughness: 0.85, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
@@ -464,7 +472,7 @@ export class SketchScene {
       if (c.showDims) {
         for (const id of solid.featureIds) {
           const entry = pieces.get(id);
-          if (entry) this.addPieceDims(entry.piece, !entry.first);
+          if (entry) this.addPieceDims(entry.piece, entry.cut);
         }
       }
     }
@@ -486,10 +494,10 @@ export class SketchScene {
   }
 
   /** The measurements of one piece of a solid: its profile, and how far it was pulled, spun or run. */
-  private addPieceDims(piece: RecipePiece, laterPiece: boolean): void {
+  private addPieceDims(piece: RecipePiece, cut: boolean): void {
     this.addDims(piece.shape);
     if (piece.op === 'pull') {
-      this.addPullDim(piece.shape, piece.distance, this.content, laterPiece && piece.distance < 0);
+      this.addPullDim(piece.shape, piece.distance, this.content, cut);
     } else if (piece.op === 'spin') {
       const obj = new CSS2DObject(labelEl(`⟳ ${Math.round(piece.angle * 10) / 10}°`, 'pull'));
       obj.position.copy(v3(piece.origin).addScaledVector(v3(piece.direction), 0.5));
@@ -541,6 +549,28 @@ export class SketchScene {
     }
     if (p.angle) this.addAngle(p.angle);
     if (p.spin) this.addSpinPreview(p.spin);
+    if (p.ghost) {
+      const src = this.content.children.find(o => (o.userData.solid as SolidMesh | undefined)?.solidId === p.ghost!.solidId) as THREE.Mesh | undefined;
+      for (const m of src ? p.ghost.matrices : []) {
+        const ghost = new THREE.Mesh(src!.geometry, new THREE.MeshStandardMaterial({
+          color: t.preview, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false,
+        }));
+        ghost.userData.sharedGeometry = true; // the solid's own: not disposed with the preview
+        ghost.applyMatrix4(new THREE.Matrix4().fromArray(m));
+        ghost.renderOrder = 3;
+        this.preview.add(ghost);
+      }
+    }
+    if (p.line) {
+      const { a, b } = p.line;
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len > 1e-6) {
+        const k = p.line.extend ? Math.max(len, 3000 / Math.max(this.pxPerMm(), 1e-6) / 10) : 0;
+        const u = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+        const from = { x: a.x - u.x * k, y: a.y - u.y * k }, to = { x: b.x + u.x * k, y: b.y + u.y * k };
+        this.preview.add(this.dashed([from, to], p.line.plane, t.preview));
+      }
+    }
     if (p.readout) {
       const obj = new CSS2DObject(labelEl(p.readout.text, 'readout'));
       obj.position.copy(v3(p.readout.at));
@@ -731,7 +761,7 @@ export class SketchScene {
       g.remove(o);
       o.traverse(c => {
         const m = c as THREE.Mesh;
-        m.geometry?.dispose?.();
+        if (!c.userData.sharedGeometry) m.geometry?.dispose?.();
         const mat = m.material as THREE.Material | THREE.Material[] | undefined;
         if (Array.isArray(mat)) mat.forEach(x => x.dispose()); else mat?.dispose?.();
         if (c instanceof CSS2DObject) c.element.remove();
