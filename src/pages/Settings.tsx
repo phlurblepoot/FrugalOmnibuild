@@ -29,6 +29,14 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.6.5',
+    date: 'October 29, 2026',
+    changes: [
+      'Change: on the takeoff canvas, lengths now read in feet and inches to the nearest 1/32", such as 30\' - 6 1/2". This covers the labels on the plan and the selection bar, even when the takeoff counts in inches, feet or yards. Totals, the sidebar, the legend, exports and prices still use the exact decimal value.',
+      'Change: a line\'s label now runs along the line, centred just above it, and never reads upside down. A vertical line\'s label reads from bottom to top.',
+    ],
+  },
+  {
     version: '4.6.4',
     date: 'October 28, 2026',
     changes: [

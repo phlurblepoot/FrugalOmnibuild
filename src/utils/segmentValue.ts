@@ -19,7 +19,7 @@ import {
   calculateSurfaceAreaPx,
   convertUnit,
   expandArcPoints,
-  formatMeasurement,
+  formatCanvasMeasurement,
   measurementAreaPx,
 } from './math';
 
@@ -171,10 +171,10 @@ export const describeQuantity = (q: PixelQuantity, ctx: QuantityContext): Quanti
   const multiplier = ctx.multiplier ?? 1;
   const sign = q.pixelValue < 0 ? '−' : '';
   const value: QuantityValue = {
-    quantity: formatMultiplied(Math.abs(q.pixelValue), multiplier, px => `${sign}${formatMeasurement(px, q.type, ctx.scale, ctx.takeoff)}`),
+    quantity: formatMultiplied(Math.abs(q.pixelValue), multiplier, px => `${sign}${formatCanvasMeasurement(px, q.type, ctx.scale, ctx.takeoff)}`),
   };
   if (q.lengthPixelValue !== undefined) {
-    value.length = formatMeasurement(q.lengthPixelValue, 'length', ctx.scale, linearTakeoff(ctx.takeoff));
+    value.length = formatCanvasMeasurement(q.lengthPixelValue, 'length', ctx.scale, linearTakeoff(ctx.takeoff));
   }
   const inTakeoffUnits = quantityInTakeoffUnits(q, ctx);
   if (inTakeoffUnits !== null && ctx.totals?.type === q.type) {
@@ -204,6 +204,22 @@ export const labelAnchor = (type: MeasurementType, displayPoints: Point[]): Poin
   }
   const sum = displayPoints.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
   return { x: sum.x / displayPoints.length, y: sum.y / displayPoints.length };
+};
+
+// The angle (degrees, Konva's clockwise) a line's label runs at: along the
+// stretch labelAnchor sits on, turned within [-90, 90) so it never reads upside
+// down. A vertical line's label reads bottom to top, as on a drawing. Anything
+// that is not a line keeps its label level.
+export const labelAngle = (type: MeasurementType, displayPoints: Point[]): number => {
+  if (type !== 'length' || displayPoints.length < 2) return 0;
+  const mid = Math.floor((displayPoints.length - 1) / 2);
+  const a = displayPoints[mid];
+  const b = displayPoints[Math.min(mid + 1, displayPoints.length - 1)];
+  if (a.x === b.x && a.y === b.y) return 0;
+  let deg = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+  if (deg >= 90) deg -= 180;
+  else if (deg < -90) deg += 180;
+  return deg;
 };
 
 // Canvas label metrics, in screen px (divided by stageScale on the canvas):

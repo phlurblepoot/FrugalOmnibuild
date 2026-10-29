@@ -797,7 +797,8 @@ test.describe('CanvasView measurement multiplier', () => {
     await expect(row.getByTestId('measurement-value')).toHaveText('60.00 ft');
     await expect(row.getByTestId('measurement-multiplier-math')).toHaveText('30.00 ft × 2 = 60.00 ft');
     await expect(sidebar.getByTestId('takeoff-total')).toHaveText('60.00 ft');
-    await expect(authedPage.getByTestId('selection-info-total')).toHaveText('Measurement total30.00 ft × 2 = 60.00 ft · $300');
+    // The canvas shows a length in feet and inches; the sidebar keeps the takeoff's unit.
+    await expect(authedPage.getByTestId('selection-info-total')).toHaveText(`Measurement total30' - 0" × 2 = 60' - 0" · $300`);
     // Visual proof of the canvas label, sidebar row and selection bar.
     await authedPage.screenshot({ path: 'test-results/measurement-multiplier.png' });
 

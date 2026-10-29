@@ -17,6 +17,7 @@ import {
   formatQuantityValue,
   segmentLabelText,
   labelAnchor,
+  labelAngle,
   placeSegmentLabel,
   summarizeSelection,
 } from './segmentValue';
@@ -268,10 +269,10 @@ describe('describeQuantity / formatQuantityValue / segmentLabelText', () => {
     expect(describeQuantity({ type: 'length', pixelValue: 100 }, { ...ctx, takeoff: undefined })).toEqual({ quantity: `10' - 0"` });
   });
 
-  it("a surface area adds a length line in the takeoff's linear unit", () => {
+  it('a surface area adds a length line, in feet and inches on the canvas', () => {
     const v = describeQuantity({ type: 'area', pixelValue: 16000, lengthPixelValue: 100 }, ctx);
-    expect(v).toEqual({ quantity: '160.00 sq ft', length: '10.00 ft', dollars: '$560' });
-    expect(segmentLabelText(v)).toBe('160.00 sq ft · $560\nLength: 10.00 ft');
+    expect(v).toEqual({ quantity: '160.00 sq ft', length: `10' - 0"`, dollars: '$560' });
+    expect(segmentLabelText(v)).toBe(`160.00 sq ft · $560\nLength: 10' - 0"`);
     // No takeoff unit: feet and inches, like an ungrouped length.
     expect(describeQuantity({ type: 'area', pixelValue: 16000, lengthPixelValue: 100 }, { scale }).length).toBe(`10' - 0"`);
   });
@@ -290,8 +291,8 @@ describe('describeQuantity / formatQuantityValue / segmentLabelText', () => {
 
   it('a multiplied surface area multiplies the area; its length line stays the run drawn', () => {
     const v = describeQuantity({ type: 'area', pixelValue: 16000, lengthPixelValue: 100 }, { ...ctx, multiplier: 2 });
-    expect(v).toEqual({ quantity: '160.00 sq ft × 2 = 320.00 sq ft', length: '10.00 ft', dollars: '$1,120' });
-    expect(segmentLabelText(v)).toBe('160.00 sq ft × 2 = 320.00 sq ft · $1,120\nLength: 10.00 ft');
+    expect(v).toEqual({ quantity: '160.00 sq ft × 2 = 320.00 sq ft', length: `10' - 0"`, dollars: '$1,120' });
+    expect(segmentLabelText(v)).toBe(`160.00 sq ft × 2 = 320.00 sq ft · $1,120\nLength: 10' - 0"`);
   });
 
   it('a count is "1 each" priced per marker', () => {
@@ -463,5 +464,36 @@ describe('summarizeSelection', () => {
       return prorateQuantityCost(totals[0], quantityInTakeoffUnits(q, { scale, takeoff: priced })!)!;
     });
     expect(segDollars.reduce((a, b) => a + b, 0)).toBeCloseTo(allocateSubsetCost(totals[0], row.realValue), 6);
+  });
+});
+
+describe('labelAngle', () => {
+  const line = (dx: number, dy: number) => [{ x: 100, y: 100 }, { x: 100 + dx, y: 100 + dy }];
+
+  it('runs along the line, never upside down', () => {
+    expect(labelAngle('length', line(10, 0))).toBeCloseTo(0);
+    expect(labelAngle('length', line(-10, 0))).toBeCloseTo(0); // drawn right to left: still reads left to right
+    expect(labelAngle('length', line(10, 10))).toBeCloseTo(45);
+    expect(labelAngle('length', line(-10, -10))).toBeCloseTo(45);
+    expect(labelAngle('length', line(10, -10))).toBeCloseTo(-45);
+    expect(labelAngle('length', line(-10, 10))).toBeCloseTo(-45);
+  });
+
+  it('a vertical line reads bottom to top, whichever way it was drawn', () => {
+    expect(labelAngle('length', line(0, 10))).toBeCloseTo(-90);
+    expect(labelAngle('length', line(0, -10))).toBeCloseTo(-90);
+  });
+
+  it('follows the stretch the label sits on', () => {
+    // labelAnchor puts the label on the stretch after the middle point.
+    expect(labelAngle('length', [{ x: 0, y: 0 }, { x: 0, y: 50 }, { x: 80, y: 50 }])).toBeCloseTo(0);
+    expect(labelAngle('length', [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 80 }, { x: 0, y: 80 }])).toBeCloseTo(-90);
+  });
+
+  it('keeps area, count and single-point labels level', () => {
+    expect(labelAngle('area', line(10, 10))).toBe(0);
+    expect(labelAngle('count', [{ x: 1, y: 1 }])).toBe(0);
+    expect(labelAngle('length', [{ x: 1, y: 1 }])).toBe(0);
+    expect(labelAngle('length', [{ x: 1, y: 1 }, { x: 1, y: 1 }])).toBe(0);
   });
 });
