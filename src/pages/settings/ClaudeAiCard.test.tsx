@@ -9,9 +9,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const MODELS = [
-  { id: 'claude-opus-5-5', label: 'Opus 5.5', centsPerSheet: 3 },
-  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', centsPerSheet: 1.5 },
-  { id: 'claude-haiku-5-5', label: 'Haiku 5.5', centsPerSheet: 0.1 },
+  { id: 'claude-opus-5-5', label: 'Opus 5.5', centsPerSheet: 7 },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', centsPerSheet: 3.5 },
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5', centsPerSheet: 0.2 },
 ];
 const off = { connected: false, source: null, last4: null, connectedAt: null, model: 'claude-opus-5-5', models: MODELS };
 const on = { ...off, connected: true, source: 'token', last4: 'WXYZ', connectedAt: '2026-10-29T00:00:00Z' };
@@ -85,7 +85,7 @@ describe('ClaudeAiCard', () => {
     render(<ClaudeAiCard isAdmin />);
     fireEvent.click(await screen.findByRole('radio', { name: 'API key' }));
     expect(screen.getByLabelText('API key')).toBeInTheDocument();
-    expect(screen.getByText(/3¢ on Opus, 1.5¢ on Sonnet, 0.1¢ on Haiku/)).toBeInTheDocument();
+    expect(screen.getByText(/7¢ on Opus, 3.5¢ on Sonnet, 0.2¢ on Haiku/)).toBeInTheDocument();
     expect(screen.getByText(/Use this for anything shared more widely/)).toBeInTheDocument();
   });
 

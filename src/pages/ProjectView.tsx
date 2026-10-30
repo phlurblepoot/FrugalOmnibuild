@@ -8,7 +8,8 @@ import { calculateTakeoffTotalCost, evaluateMathExpression } from '../utils/math
 import { buildTakeoffExcelRows } from './project/takeoffExcel';
 import { loadPdfPagesGenerator } from '../utils/pdf';
 import { computeRevisionModel, orderedPlanSets, summarizePlanSet, effectiveSheetId, carryForwardFrom } from '../utils/planSets';
-import { readSheet, matchSheet, runWithConcurrency, applyReadToPage, applyMatchToPage, aiAutoNameEnabled, aiScanBlocker, aiScanSummary, type AiPageImages, type AiScanProgress } from '../utils/aiSheets';
+import { readPagesWithClaude } from '../utils/aiPageInput';
+import { matchSheet, runWithConcurrency, applyReadToPage, applyMatchToPage, aiAutoNameEnabled, aiScanBlocker, aiScanSummary, type AiPageImages, type AiScanProgress } from '../utils/aiSheets';
 import { composePageName, nextPlaceholderStart } from '../utils/sheetNaming';
 import { PlanSetManager } from '../components/PlanSetManager';
 import { PlanSetRevisions } from '../components/PlanSetRevisions';
@@ -258,8 +259,8 @@ export const ProjectView: React.FC = () => {
   const [isNamingExistingPages, setIsNamingExistingPages] = useState(false);
   const [pendingPages, setPendingPages] = useState<any[]>([]);
   const [pendingThumbnails, setPendingThumbnails] = useState<Record<string, string>>({});
-  // Medium-res per-page images for AI reading, kept so the manual "AI Scan"
-  // button can re-run reads without re-rendering the PDF.
+  // Full-size AI images for pages whose PDF could not be stored (AI Scan
+  // renders the others from the stored PDF; see utils/aiPageInput.ts).
   const [aiImages, setAiImages] = useState<Record<string, AiPageImages>>({});
   const [newPlanSetName, setNewPlanSetName] = useState('');
   const [newPlanSetDate, setNewPlanSetDate] = useState(new Date().toISOString().split('T')[0]);
@@ -697,10 +698,10 @@ export const ProjectView: React.FC = () => {
 
       const extractedPages: any[] = [];
       const thumbnails: Record<string, string> = {};
-      // Transient per-page medium-res images for AI reading (not stored).
+      // Transient full-size AI images (not stored), rendered here only when AI
+      // sheet reading is on and the source PDF could not be stored: otherwise
+      // AI Scan renders them from the stored PDF.
       const aiImages: Record<string, AiPageImages> = {};
-      // Render the AI image whenever auto-naming is on so the manual "AI Scan"
-      // button always has a good image; the auto pass also requires readiness.
       const aiWanted = aiAutoNameEnabled();
 
       // Placeholder sequence is scoped to the TARGET plan set (a brand new set
@@ -746,7 +747,7 @@ export const ProjectView: React.FC = () => {
           const generator = loadPdfPagesGenerator(file, (status, current, total) => {
             if (total > 0) fileExpected = total;
             setAddProgress(prev => ({ ...prev, status, current, total }));
-          }, undefined, { includeFullPageRaster: !sourcePdfFileId, includeAiImage: aiWanted });
+          }, undefined, { includeFullPageRaster: !sourcePdfFileId, includeAiImage: aiWanted && !sourcePdfFileId });
 
           for await (const pageData of generator) {
             fileYielded++;
@@ -795,7 +796,7 @@ export const ProjectView: React.FC = () => {
               };
 
               extractedPages.push(newPage);
-              if (pageData.aiImageDataUrl) aiImages[newPage.id] = { page: pageData.aiImageDataUrl, titleBlock: pageData.aiTitleBlockDataUrl || undefined };
+              if (pageData.aiImageDataUrl) aiImages[newPage.id] = { page: pageData.aiImageDataUrl, details: pageData.aiDetailDataUrls ?? [] };
 
               const newProjectPage = {
                 id: newPage.id,
@@ -1313,22 +1314,7 @@ export const ProjectView: React.FC = () => {
       return;
     }
     const pages = pendingPages;
-    let count = 0;
-    report({ phase: 'scanning', done: 0, total: pages.length });
-    const reads = await runWithConcurrency(
-      pages.map(pg => async () => {
-        const result = await readSheet({
-          imageId: aiImages[pg.id] ? undefined : (pg.imageId || undefined),
-          imageBase64: aiImages[pg.id]?.page || (pg.imageId ? undefined : pendingThumbnails[pg.thumbnailId]),
-          titleBlockBase64: aiImages[pg.id]?.titleBlock,
-          embeddedText: pg.extractedText,
-        });
-        count++;
-        report({ phase: 'scanning', done: count, total: pages.length });
-        return result;
-      }),
-      3,
-    );
+    const { reads, noImage } = await readPagesWithClaude(pages, aiImages, report);
     let named = pages.map((pg, i) => (reads[i] ? applyReadToPage(pg, reads[i]!) : pg));
     if (!isNamingExistingPages && project) {
       const pendingIds = new Set(pages.map(p => p.id));
@@ -1352,7 +1338,7 @@ export const ProjectView: React.FC = () => {
       }
     }
     setPendingPages(named);
-    const summary = aiScanSummary(reads.filter(Boolean).length, pages.length);
+    const summary = aiScanSummary(reads.filter(Boolean).length, pages.length, noImage);
     toast(summary.message, { type: summary.type });
     report({ phase: 'done' });
   };

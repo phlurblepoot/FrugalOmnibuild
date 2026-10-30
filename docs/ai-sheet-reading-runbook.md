@@ -15,10 +15,23 @@ pages keep the names they already had.
 Nothing is sent until someone clicks **AI Scan** on the naming screen, or picks
 the **AI read** engine in the extract tool. Then, for each page:
 
-- the whole sheet as an image (at most 1568 pixels on the long side, which is
-  the most Claude looks at);
-- a sharper image of the bottom-right corner, where the title block usually is;
-- the text the PDF already holds for that page, if any.
+- the whole sheet as an image (1568 pixels on the long side, which is the most
+  Claude looks at);
+- the same sheet in four quarters, each at that size, so small print is twice
+  as sharp wherever it is on the sheet and whichever way it is turned. Always
+  full-size images, rendered from the stored PDF; never the small previews;
+- for PDF pages, the page's largest text (sheet numbers, titles, drawing labels)
+  with where each sits and which way it is turned;
+- the text the PDF already holds for that page, if any;
+- what Claude learned from the earlier pages of the same set: short notes on
+  where this set keeps its sheet number and title, and the sheets read so far.
+
+Claude reads the whole page to understand its layout, so it does not assume
+where the title block is. When a sheet has no printed title (two elevations on
+a page, each with its own label, say), Claude names the sheet from what is
+drawn on it, e.g. "Exterior Elevations". The first page of a scan is read on
+its own; the rest follow the set's layout, except a sheet that differs, such
+as a cover.
 
 For the extract tool's **AI read**, only the box you drew is sent.
 
@@ -73,9 +86,9 @@ Each sheet is billed to that account, roughly:
 
 | Model | About |
 |---|---|
-| Opus 5.5 (default) | 3¢ a sheet |
-| Sonnet 5.5 | 1.5¢ a sheet |
-| Haiku 5.5 | 0.1¢ a sheet |
+| Opus 5.5 (default) | 7¢ a sheet |
+| Sonnet 5.5 | 3.5¢ a sheet |
+| Haiku 5.5 | 0.2¢ a sheet |
 
 ### C. Sign the server in (optional)
 

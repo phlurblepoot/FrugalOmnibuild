@@ -5,8 +5,8 @@ import { test, expect, login, loginAsNewUser } from './fixtures/test';
 // Claude reads plan sheets (docs/ai-sheet-reading-runbook.md). The e2e server
 // has no Claude credentials: it runs with AI_FAKE_CLAUDE=1 (playwright.config.ts),
 // which swaps the Agent SDK for a canned responder (server/ai/fakeClaude.ts).
-// It names pages A-101, A-102, … "Floor Plan" (adding "(no close-up)" when the
-// title-block close-up did not come with the page), and treats a token ending in
+// It names pages A-101, A-102, … "Floor Plan" (adding "(no detail)" when the
+// four full-size quarter views did not come with the page), and treats a token ending in
 // "bad0" as a rejected sign-in. The connection is server-wide, so each test
 // sets it up itself and the suite leaves it disconnected.
 
@@ -93,7 +93,7 @@ test('the API-key option shows the rough cost per sheet', async ({ authedPage: p
   await page.goto('/settings');
   const card = page.getByTestId('claude-ai-card');
   await card.getByRole('radio', { name: 'API key' }).click();
-  await expect(card.getByText(/3¢ on Opus, 1.5¢ on Sonnet, 0.1¢ on Haiku/)).toBeVisible();
+  await expect(card.getByText(/7¢ on Opus, 3.5¢ on Sonnet, 0.2¢ on Haiku/)).toBeVisible();
 });
 
 test('a non-admin sees the status but cannot reach the connection', async ({ page, request }) => {
@@ -128,6 +128,25 @@ test('AI Scan names uploaded pages with Claude', async ({ authedPage: page, requ
   await page.getByRole('button', { name: /^Finish/ }).click();
   await expect(page).toHaveURL(/\/project\//, { timeout: 30_000 });
   await expect(page.getByText(/A-1\d\d/).first()).toBeVisible();
+});
+
+test('AI Scan from Name Pages reads pages already in a project, at full size', async ({ authedPage: page, request }) => {
+  const { token } = await login(request);
+  await connectClaude(request, token);
+  // Upload and finish without scanning: the pages are now stored as the source PDF.
+  await uploadToNamingStep(page, `AI existing ${Date.now()}`);
+  await page.getByRole('button', { name: /^Finish/ }).click();
+  await expect(page).toHaveURL(/\/project\//, { timeout: 30_000 });
+  const projectId = page.url().match(/\/project\/([^/?#]+)/)![1];
+  await page.goto(`/project/${projectId}/takeoff`);
+  await expect(page.getByTestId('page-row')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Name Pages' }).click();
+  await page.getByRole('button', { name: 'AI Scan' }).click();
+  await expect(page.getByText(/Claude read 2 of 2 pages/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder('e.g. A-101').first()).toHaveValue(/^A-1\d\d$/);
+  // "Floor Plan", not "Floor Plan (no detail)": the full-size views were sent.
+  await expect(page.getByPlaceholder('e.g. Floor Plan').first()).toHaveValue('Floor Plan');
 });
 
 test('with Claude off, uploads still work: pages keep their names and their PDF text, and AI Scan says why', async ({ authedPage: page, request }) => {

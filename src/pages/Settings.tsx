@@ -32,6 +32,17 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.0.3',
+    date: 'October 30, 2026',
+    changes: [
+      'Fix: AI Scan from Name Pages on pages already in a project read nothing ("imageId or imageBase64 required"). It now renders each page from the stored PDF when you scan, so it works on any page, new or old.',
+      'AI Scan always sends Claude full-size images, never the small previews: the whole sheet, plus the sheet in four quarters at twice the detail, so small print reads wherever it is and whichever way it is turned. For PDF pages it also sends the page\'s largest text (sheet numbers, titles, drawing labels) with where each sits and which way it runs.',
+      'Claude no longer assumes the title block is in the bottom-right corner. A sheet with no printed title, such as two labelled elevations, gets a sensible name like "Exterior Elevations"; a sheet with no printed number is left without one.',
+      'Claude reads a set as a set: the first page on its own, then each later page with short notes on how the set is laid out and the sheets read so far, while a cover or other odd sheet is still read on its own terms.',
+      'Uploads are a little faster: the AI images are no longer rendered while uploading. With an API key, a sheet now costs roughly 7¢ on Opus, 3.5¢ on Sonnet or 0.2¢ on Haiku (more images per sheet).',
+    ],
+  },
+  {
     version: '4.8.0.2',
     date: 'October 30, 2026',
     changes: [

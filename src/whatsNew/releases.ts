@@ -49,9 +49,10 @@ export const RELEASES: WhatsNewRelease[] = [
     pages: [
       {
         id: 'claude-reads', kind: 'new', area: 'Plan sets', title: 'Claude reads your plan sheets',
-        body: 'When you upload a plan set, click AI Scan on the Name Pages screen and Claude fills in each page’s sheet number and title from its title block. On a revised set it also picks the sheet each new page replaces.',
+        body: 'Click AI Scan on the Name Pages screen and Claude fills in each page’s sheet number and title, wherever the set keeps them and whichever way they are printed. On a revised set it also picks the sheet each new page replaces.',
         points: [
-          'Check the names, fix any it got wrong, then Finish.',
+          'A sheet with no printed title, such as two labelled elevations, gets a sensible name like “Exterior Elevations”.',
+          'Works on pages already in a project too: Name Pages, then AI Scan. Check the names, fix any it got wrong, then Finish.',
           'Draw a box with the extract tool and pick AI read to have Claude read just that box on every page.',
           'Without Claude, naming works as before, from the PDF’s text and OCR. If a read fails, it says why and the pages keep their names.',
         ],

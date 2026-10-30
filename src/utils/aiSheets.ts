@@ -1,7 +1,34 @@
 import { getAuthHeaders } from './store';
 import { composePageName } from './sheetNaming';
 
-export interface SheetRead { sheetNumber: string; sheetTitle: string; discipline?: string; confidence: number; }
+export interface SheetRead {
+  sheetNumber: string;
+  sheetTitle: string;
+  discipline?: string;
+  confidence: number;
+  /** Claude's notes on this set's layout, passed to its next reads. */
+  setNotes?: string;
+}
+
+/** What earlier reads of a set taught, sent with each later read of it. */
+export interface SetContext { notes?: string; sheets: Array<{ number: string; title: string }>; }
+
+/** Remembers one scan's reads so each later page is read knowing the set's
+ *  layout and the sheets before it. A cover or other odd sheet brings back
+ *  empty notes, which leave the last useful ones in place. */
+export function createSetMemory() {
+  let notes = '';
+  const sheets: SetContext['sheets'] = [];
+  return {
+    context(): SetContext | undefined {
+      return notes || sheets.length ? { notes: notes || undefined, sheets: sheets.slice(-40) } : undefined;
+    },
+    learn(read: SheetRead): void {
+      if (read.setNotes?.trim()) notes = read.setNotes.trim();
+      if (read.sheetNumber || read.sheetTitle) sheets.push({ number: read.sheetNumber, title: read.sheetTitle });
+    },
+  };
+}
 export interface SheetMatch { matchSheetId: string | null; confidence: number; reason?: string; }
 export interface AiStatus {
   available: boolean;
@@ -17,9 +44,9 @@ export interface ExistingSheetRef { sheetId: string; number: string; title: stri
 export type AiScanPhase = 'loading' | 'scanning' | 'done';
 export interface AiScanProgress { phase: AiScanPhase; done?: number; total?: number; }
 
-/** The transient images rendered for one page at upload: the whole sheet and a
- *  sharper crop of its title-block corner. */
-export interface AiPageImages { page: string; titleBlock?: string; }
+/** The full-size images Claude reads a page from: the whole sheet, and the
+ *  sheet in quarters at twice the detail (see utils/pdf.ts AiSheetImages). */
+export interface AiPageImages { page: string; details: string[]; }
 
 /** Minimal shape of a review page the apply helpers touch. */
 export interface AiPage {
@@ -75,7 +102,7 @@ async function postAi<T>(path: string, input: unknown): Promise<T | null> {
   }
 }
 
-export function readSheet(input: { imageId?: string; imageBase64?: string; titleBlockBase64?: string; embeddedText?: string }): Promise<SheetRead | null> {
+export function readSheet(input: { imageId?: string; imageBase64?: string; detailBase64s?: string[]; layoutText?: string; embeddedText?: string; setContext?: SetContext }): Promise<SheetRead | null> {
   return postAi<SheetRead>('/api/ai/read-sheet', input);
 }
 
@@ -100,10 +127,11 @@ export async function aiScanBlocker(): Promise<string | null> {
 
 /** One toast-ready line for the end of an AI Scan. When reads failed, it says
  *  why (sign-in, usage limit, …) and that the pages keep their current names. */
-export function aiScanSummary(hits: number, total: number): { message: string; type: 'success' | 'warning' | 'error' } {
+export function aiScanSummary(hits: number, total: number, noImage = 0): { message: string; type: 'success' | 'warning' | 'error' } {
   const pages = `${total} page${total === 1 ? '' : 's'}`;
   if (hits === total) return { message: `Claude read ${hits} of ${pages}.`, type: 'success' };
-  const why = lastAiError ? ` ${lastAiError}` : '';
+  const missing = noImage ? ` ${noImage} page${noImage === 1 ? ' has' : 's have'} no full-size image to send.` : '';
+  const why = `${missing}${lastAiError && noImage < total - hits ? ` ${lastAiError}` : ''}`;
   const keep = ' The other pages keep their names; you can use Extract (text/OCR) for them.';
   return { message: `Claude read ${hits} of ${pages}.${why}${hits ? keep : ''}`, type: hits ? 'warning' : 'error' };
 }

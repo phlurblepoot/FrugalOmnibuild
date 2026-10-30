@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { runWithConcurrency, applyReadToPage, applyMatchToPage, readSheet, getLastAiError, aiScanSummary, type AiPage } from './aiSheets';
+import { runWithConcurrency, applyReadToPage, applyMatchToPage, readSheet, getLastAiError, aiScanSummary, createSetMemory, type AiPage } from './aiSheets';
 
 describe('runWithConcurrency', () => {
   it('runs all items, never exceeding the limit, preserving order', async () => {
@@ -75,5 +75,29 @@ describe('readSheet errors and the scan summary', () => {
     expect(await readSheet({ imageBase64: 'x' })).toMatchObject({ sheetNumber: 'A-1' });
     expect(getLastAiError()).toBeNull();
     expect(aiScanSummary(2, 2)).toEqual({ message: 'Claude read 2 of 2 pages.', type: 'success' });
+  });
+});
+
+describe('createSetMemory', () => {
+  it('starts empty, then carries the latest useful notes and the sheets read so far', () => {
+    const m = createSetMemory();
+    expect(m.context()).toBeUndefined();
+    m.learn({ sheetNumber: '', sheetTitle: 'Cover Sheet', confidence: 0.6, setNotes: '' });
+    expect(m.context()).toEqual({ notes: undefined, sheets: [{ number: '', title: 'Cover Sheet' }] });
+    m.learn({ sheetNumber: 'A-101', sheetTitle: 'First Floor Plan', confidence: 0.9, setNotes: 'Right strip.' });
+    // An odd sheet with no notes keeps the notes learned before it.
+    m.learn({ sheetNumber: 'C-1', sheetTitle: 'Site Plan', confidence: 0.9 });
+    expect(m.context()).toEqual({
+      notes: 'Right strip.',
+      sheets: [{ number: '', title: 'Cover Sheet' }, { number: 'A-101', title: 'First Floor Plan' }, { number: 'C-1', title: 'Site Plan' }],
+    });
+  });
+  it('ignores empty reads and keeps the last 40 sheets', () => {
+    const m = createSetMemory();
+    m.learn({ sheetNumber: '', sheetTitle: '', confidence: 0 });
+    expect(m.context()).toBeUndefined();
+    for (let i = 0; i < 50; i++) m.learn({ sheetNumber: `A-${i}`, sheetTitle: '', confidence: 1 });
+    expect(m.context()!.sheets).toHaveLength(40);
+    expect(m.context()!.sheets[0].number).toBe('A-10');
   });
 });

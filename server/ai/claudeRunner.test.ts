@@ -38,17 +38,26 @@ function fakeQuery(reply: (call: Call) => SDKMessage[] | Promise<SDKMessage[]>, 
 const READ = '{"sheetNumber":"a-201","sheetTitle":"Second Floor Plan","discipline":"Architectural","confidence":0.9}';
 
 describe('createClaudeRunner', () => {
-  it('reads a sheet in one tool-less turn: whole page, title-block close-up, then the prompt', async () => {
+  it('reads a sheet in one tool-less turn: whole page, its four quarters, then the prompt', async () => {
     const calls: Call[] = [];
     const r = createClaudeRunner({ store: store(), queryFn: fakeQuery(() => [result(READ)], calls), env: { PATH: '/bin', ANTHROPIC_API_KEY: 'stray', HOME: '/root', MAIL_SECRET_KEY: 'mail', JWT_SECRET: 'jwt' } });
-    const read = await r.readSheet({ image: JPEG, titleBlock: PNG, embeddedText: 'A-201 SECOND FLOOR' });
+    const read = await r.readSheet({
+      image: JPEG, details: [PNG, PNG, PNG, PNG], embeddedText: 'A-201 SECOND FLOOR',
+      layoutText: '[x 91%, y 96%, turned 90°, size 24] A-201',
+      setContext: { notes: 'Number at the foot of the right strip.', sheets: [{ number: 'A-101', title: 'First Floor Plan' }] },
+    });
     expect(read).toEqual({ sheetNumber: 'A-201', sheetTitle: 'Second Floor Plan', discipline: 'Architectural', confidence: 0.9 });
 
     const [{ content, options }] = calls;
-    expect(content.map(b => b.type)).toEqual(['text', 'image', 'text', 'image', 'text']);
+    expect(content.map(b => b.type)).toEqual(['text', 'image', 'text', 'text', 'image', 'text', 'image', 'text', 'image', 'text', 'image', 'text']);
     expect(content[1].source).toEqual({ type: 'base64', media_type: 'image/jpeg', data: JPEG.toString('base64') });
-    expect(content[3].source.media_type).toBe('image/png');
-    expect(content[4].text).toContain('A-201 SECOND FLOOR');
+    expect(content.filter(b => b.type === 'text').map(b => b.text)).toEqual(expect.arrayContaining(['Top-left quarter:', 'Bottom-right quarter:']));
+    expect(content[4].source.media_type).toBe('image/png');
+    const prompt = content.at(-1).text;
+    expect(prompt).toContain('A-201 SECOND FLOOR');
+    expect(prompt).toContain('[x 91%, y 96%, turned 90°, size 24] A-201');
+    expect(prompt).toContain('Number at the foot of the right strip.');
+    expect(prompt).toContain('A-101 First Floor Plan');
     expect(options).toMatchObject({
       model: 'claude-sonnet-5-5', tools: [], settingSources: [], maxTurns: 1, persistSession: false, cwd: '/tmp/ft-claude-test/work',
     });

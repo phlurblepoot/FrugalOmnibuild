@@ -19,6 +19,8 @@ import { SYSTEM_PROMPT, buildReadPrompt, parseReadResponse, buildMatchPrompt, pa
 export type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => AsyncIterable<SDKMessage>;
 type UserContent = SDKUserMessage['message']['content'];
 
+const QUARTERS = ['Top-left quarter', 'Top-right quarter', 'Bottom-left quarter', 'Bottom-right quarter'];
+
 /** Environment variables the Claude Code subprocess inherits from the server. */
 const PASSED_ENV = [
   'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR',
@@ -187,10 +189,13 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
     info: () => ({ model: cfg.store.getModel(), device: cfg.store.resolve() ? 'cloud' : 'none' }),
     lastError: () => lastError,
 
-    readSheet({ image: page, titleBlock, embeddedText, prompt }) {
+    readSheet({ image: page, details = [], layoutText, embeddedText, setContext, prompt }) {
       const content: UserContent = [text('The whole sheet:'), image(page)];
-      if (titleBlock) content.push(text('A closer, higher-resolution view of the bottom-right corner, where the title block usually is:'), image(titleBlock));
-      content.push(text(prompt || buildReadPrompt(embeddedText)));
+      if (details.length) {
+        content.push(text('The same sheet in quarters, at twice the detail, for small print:'));
+        details.forEach((d, i) => content.push(text(`${QUARTERS[i] ?? `Part ${i + 1}`}:`), image(d)));
+      }
+      content.push(text(prompt || buildReadPrompt(embeddedText, layoutText, setContext)));
       return run('read-sheet', content, parseReadResponse);
     },
 

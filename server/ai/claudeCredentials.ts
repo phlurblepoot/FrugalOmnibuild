@@ -20,9 +20,11 @@ export type ClaudeSecretKind = 'token' | 'apiKey';
 export type ClaudeSource = ClaudeSecretKind | 'env' | 'login';
 
 export const CLAUDE_MODELS = [
-  { id: 'claude-opus-5-5', label: 'Opus 5.5', centsPerSheet: 3 },
-  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', centsPerSheet: 1.5 },
-  { id: 'claude-haiku-5-5', label: 'Haiku 5.5', centsPerSheet: 0.1 },
+  // Rough API-key cost of one sheet: five images (the page and its quarters)
+  // plus its text, about 15k tokens in and a few hundred out.
+  { id: 'claude-opus-5-5', label: 'Opus 5.5', centsPerSheet: 7 },
+  { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', centsPerSheet: 3.5 },
+  { id: 'claude-haiku-5-5', label: 'Haiku 5.5', centsPerSheet: 0.2 },
 ] as const;
 export type ClaudeModelId = typeof CLAUDE_MODELS[number]['id'];
 export const DEFAULT_CLAUDE_MODEL: ClaudeModelId = 'claude-opus-5-5';

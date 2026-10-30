@@ -1,4 +1,4 @@
-import type { AiRunner, ExistingSheetRef, SheetRead } from './types';
+import type { AiRunner, ExistingSheetRef, SheetRead, SetContext } from './types';
 
 export interface HandlerResult { status: number; body: unknown; }
 
@@ -22,6 +22,23 @@ function failure(e: any): HandlerResult {
   return { status: 502, body: { error: String(e?.message ?? e), code: e?.code ?? 'other' } };
 }
 
+/** The set context as sent by the browser, trimmed to sane sizes; anything
+ *  malformed is dropped rather than refused. */
+export function cleanSetContext(raw: unknown): SetContext | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as { notes?: unknown; sheets?: unknown };
+  const notes = typeof r.notes === 'string' && r.notes.trim() ? r.notes.trim().slice(0, 1000) : undefined;
+  const sheets = (Array.isArray(r.sheets) ? r.sheets : [])
+    .filter((x): x is { number: unknown; title: unknown } => !!x && typeof x === 'object')
+    .map(x => ({
+      number: typeof x.number === 'string' ? x.number.trim().slice(0, 40) : '',
+      title: typeof x.title === 'string' ? x.title.trim().slice(0, 100) : '',
+    }))
+    .filter(x => x.number || x.title)
+    .slice(-40);
+  return notes || sheets.length ? { notes, sheets } : undefined;
+}
+
 function decodeBase64Image(input: string): Buffer | null {
   const comma = input.indexOf(',');
   const b64 = input.startsWith('data:') && comma >= 0 ? input.slice(comma + 1) : input;
@@ -31,7 +48,7 @@ function decodeBase64Image(input: string): Buffer | null {
 export async function handleReadSheet(
   runner: AiRunner,
   loadImage: ImageLoader,
-  body: { imageId?: string; imageBase64?: string; titleBlockBase64?: string; embeddedText?: string; prompt?: string; idleTimeoutMs?: number },
+  body: { imageId?: string; imageBase64?: string; detailBase64s?: string[]; layoutText?: string; embeddedText?: string; setContext?: unknown; prompt?: string; idleTimeoutMs?: number },
 ): Promise<HandlerResult> {
   if (!runner.configured()) return { status: 503, body: { error: 'ai unavailable' } };
 
@@ -46,10 +63,16 @@ export async function handleReadSheet(
     return { status: 400, body: { error: 'imageId or imageBase64 required' } };
   }
 
-  const titleBlock = body.titleBlockBase64 ? decodeBase64Image(body.titleBlockBase64) ?? undefined : undefined;
+  // At most the four quarters; anything that isn't a base64 image is dropped.
+  const details = (Array.isArray(body.detailBase64s) ? body.detailBase64s : [])
+    .slice(0, 4)
+    .map(d => (typeof d === 'string' ? decodeBase64Image(d) : null))
+    .filter((d): d is Buffer => !!d);
 
   try {
-    const read = await runner.readSheet({ image, titleBlock, embeddedText: body.embeddedText, prompt: body.prompt, idleTimeoutMs: body.idleTimeoutMs });
+    const layoutText = typeof body.layoutText === 'string' ? body.layoutText : undefined;
+    const setContext = cleanSetContext(body.setContext);
+    const read = await runner.readSheet({ image, details, layoutText, embeddedText: body.embeddedText, setContext, prompt: body.prompt, idleTimeoutMs: body.idleTimeoutMs });
     return { status: 200, body: read };
   } catch (e: any) {
     return failure(e);

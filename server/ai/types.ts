@@ -11,6 +11,17 @@ export interface SheetRead {
   discipline?: string;
   /** Model confidence, clamped to 0..1. */
   confidence: number;
+  /** What Claude learned about this set's layout, for reading its next sheets. */
+  setNotes?: string;
+}
+
+/** What earlier reads of the same set taught, sent with each later read so
+ *  Claude need not work the set's layout out again on every sheet. */
+export interface SetContext {
+  /** Claude's own notes from an earlier sheet: where the number and title are, their format. */
+  notes?: string;
+  /** Sheets read so far, in order. */
+  sheets?: Array<{ number: string; title: string }>;
 }
 
 /** An existing logical sheet a new page can be matched against. */
@@ -57,8 +68,10 @@ export interface AiRunner {
   info(): AiInfo;
   /** The last call's failure, cleared by the next success. */
   lastError?(): AiLastError | null;
-  /** `titleBlock` is a higher-resolution crop of the title-block corner. */
-  readSheet(input: { image: Buffer; titleBlock?: Buffer; embeddedText?: string; prompt?: string; idleTimeoutMs?: number }): Promise<SheetRead>;
+  /** `details` are the sheet's quarters at twice the detail (top-left,
+   *  top-right, bottom-left, bottom-right); `layoutText` lists the page's large
+   *  text with where it sits and which way it is turned. */
+  readSheet(input: { image: Buffer; details?: Buffer[]; layoutText?: string; embeddedText?: string; setContext?: SetContext; prompt?: string; idleTimeoutMs?: number }): Promise<SheetRead>;
   matchSheet(input: { page: SheetRead; existing: ExistingSheetRef[]; idleTimeoutMs?: number }): Promise<SheetMatch>;
   transcribeRegion(input: { image: Buffer; mode: TranscribeMode; idleTimeoutMs?: number }): Promise<TranscribeResult>;
 }
