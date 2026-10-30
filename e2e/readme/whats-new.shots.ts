@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync } from 'node:fs';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -6,26 +7,27 @@ import sharp from 'sharp';
 import type { DemoManifest } from './demo-data';
 import { open, readManifest, settle, signIn } from './shot';
 
-// The pictures in the "What's new" popup for 4.7 (src/whatsNew/releases.ts),
+// The pictures in the "What's new" popup for 4.7 and 4.8 (src/whatsNew/releases.ts),
 // taken in the demo company, light and dark, and saved as WebP in
-// public/whats-new/4.7/. Each sketch is drawn here with the editor's own
+// public/whats-new/<version>/. Each sketch is drawn here with the editor's own
 // tools; the drawing sheet and the issue report are rendered from the PDFs
 // the app makes.
 //
 //   npm run screenshots:whats-new
 
 const OUT = join('public', 'whats-new', '4.7');
+const OUT_48 = join('public', 'whats-new', '4.8');
 const THEMES = ['light', 'dark'] as const;
 type Theme = (typeof THEMES)[number];
 /** What sits under the app's sidebar (and the sketch editor's header) is left out. */
 const SIDEBAR = 64, SKETCH_HEADER = 52;
 
 let m: DemoManifest;
-test.beforeAll(() => { m = readManifest(); mkdirSync(OUT, { recursive: true }); });
+test.beforeAll(() => { m = readManifest(); mkdirSync(OUT, { recursive: true }); mkdirSync(OUT_48, { recursive: true }); });
 test.describe.configure({ timeout: 180_000 });
 
-/** Saves part of the screen (or a PNG) as public/whats-new/4.7/<name>[-dark].webp, 1200 px wide. */
-async function save(source: Page | Buffer, name: string, theme: Theme = 'light', clip?: { x: number; y: number; width: number; height: number }): Promise<void> {
+/** Saves part of the screen (or a PNG) as public/whats-new/4.7/<name>[-dark].webp (or `out`), 1200 px wide. */
+async function save(source: Page | Buffer, name: string, theme: Theme = 'light', clip?: { x: number; y: number; width: number; height: number }, out = OUT): Promise<void> {
   let raw: Buffer;
   if (Buffer.isBuffer(source)) raw = source;
   else {
@@ -34,7 +36,7 @@ async function save(source: Page | Buffer, name: string, theme: Theme = 'light',
     raw = await source.screenshot({ animations: 'disabled', caret: 'hide', clip });
   }
   await sharp(raw).resize({ width: 1200, withoutEnlargement: true }).webp({ quality: 86 })
-    .toFile(join(OUT, `${name}${theme === 'dark' ? '-dark' : ''}.webp`));
+    .toFile(join(out, `${name}${theme === 'dark' ? '-dark' : ''}.webp`));
 }
 const sketchArea = (page: Page) => {
   const v = page.viewportSize()!;
@@ -467,5 +469,88 @@ for (const theme of THEMES) {
     const dialog = (await page.getByRole('dialog').boundingBox())!;
     const pad = 24;
     await save(page, 'fix-upload', theme, { x: dialog.x - pad, y: dialog.y - pad, width: dialog.width + 2 * pad, height: dialog.height + 2 * pad });
+  });
+}
+
+// ── 4.8: Claude reads plan sheets ─────────────────────────────────────────────
+// The screenshot server fakes Claude (AI_FAKE_CLAUDE=1, server/ai/fakeClaude.ts):
+// it reads each sheet's number and title back from the page's text.
+
+const DEMO_TOKEN = `sk-ant-oat01-${'demo'.repeat(16)}7Q2k`;
+
+/** A small plan set: each sheet has a border, some walls and a title block. */
+async function demoPlanSet(): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const ink = rgb(0.15, 0.17, 0.2);
+  const sheets: Array<[string, string]> = [
+    ['A-101', 'FIRST FLOOR PLAN'], ['A-102', 'SECOND FLOOR PLAN'],
+    ['A-201', 'EXTERIOR ELEVATIONS'], ['S-101', 'FOUNDATION PLAN'],
+  ];
+  sheets.forEach(([num, title], i) => {
+    const p = doc.addPage([1224, 792]);
+    p.drawRectangle({ x: 24, y: 24, width: 1176, height: 744, borderColor: ink, borderWidth: 2 });
+    // Title block strip on the right.
+    p.drawRectangle({ x: 1010, y: 24, width: 190, height: 744, borderColor: ink, borderWidth: 1.5 });
+    p.drawText('MERIDIAN DENTAL', { x: 1022, y: 720, size: 13, font: bold, color: ink });
+    p.drawText('TENANT IMPROVEMENT', { x: 1022, y: 702, size: 10, font, color: ink });
+    p.drawText(title, { x: 1022, y: 130, size: 11, font: bold, color: ink });
+    p.drawText(num, { x: 1022, y: 60, size: 34, font: bold, color: ink });
+    // Some "drawing": rooms as rectangles, offset per sheet.
+    const o = i * 18;
+    for (const [x, y, w, h] of [[90, 120, 380, 300], [470, 120, 260, 300], [90, 420, 640, 240], [730, 120, 220, 540]]) {
+      p.drawRectangle({ x: x + o / 2, y: y + o / 3, width: w - o / 2, height: h - o / 3, borderColor: ink, borderWidth: 3 });
+    }
+    p.drawText(`${num} ${title}`, { x: 90, y: 80, size: 14, font: bold, color: ink });
+  });
+  return Buffer.from(await doc.save());
+}
+
+async function connectDemoClaude(page: Page) {
+  const token = await page.evaluate(() => localStorage.getItem('token'));
+  const res = await page.request.put('/api/ai/claude/credential', {
+    headers: { Authorization: `Bearer ${token}` }, data: { kind: 'token', secret: DEMO_TOKEN },
+  });
+  expect(res.ok()).toBeTruthy();
+}
+
+for (const theme of THEMES) {
+  test(`4.8 claude: AI Scan names a new plan set (${theme})`, async ({ page }) => {
+    await signIn(page, m, theme);
+    await open(page, '/new');
+    await connectDemoClaude(page);
+    await page.getByLabel('Project Name').fill('Meridian Dental - Phase 2');
+    await page.locator('input[type=file][accept="application/pdf"]').setInputFiles({ name: 'Meridian Dental permit set.pdf', mimeType: 'application/pdf', buffer: await demoPlanSet() });
+    await page.getByRole('button', { name: 'Next Step' }).click();
+    await expect(page.getByRole('heading', { name: 'Name Pages' })).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'AI Scan' }).click();
+    await expect(page.getByPlaceholder('e.g. A-101').first()).toHaveValue('A-101', { timeout: 60_000 });
+    await expect(page.getByPlaceholder('e.g. Floor Plan').first()).toHaveValue('First Floor Plan');
+    await page.mouse.move(0, 0);
+    await settle(page);
+    // The Name Pages card down to the first row of pages, without the sidebar.
+    const heading = (await page.getByRole('heading', { name: 'Name Pages' }).boundingBox())!;
+    const row = (await page.getByPlaceholder('e.g. Floor Plan').first().boundingBox())!;
+    const finish = (await page.getByRole('button', { name: /^Finish/ }).boundingBox())!;
+    const pad = 32;
+    const x = heading.x - pad, y = Math.max(0, heading.y - pad);
+    await save(page, 'ai-scan', theme, { x, y, width: finish.x + finish.width + pad - x, height: row.y + row.height + 2 * pad - y }, OUT_48);
+  });
+
+  test(`4.8 claude: connecting Claude in Settings (${theme})`, async ({ page }) => {
+    await signIn(page, m, theme);
+    await open(page, '/settings');
+    await connectDemoClaude(page);
+    await page.reload();
+    const card = page.getByTestId('claude-ai-card');
+    await expect(card.getByText('Connected', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Test connection' }).click();
+    await expect(card.getByRole('status')).toContainText('Claude answered');
+    await card.scrollIntoViewIfNeeded();
+    await settle(page);
+    const b = (await card.boundingBox())!;
+    const pad = 16;
+    await save(page, 'connect', theme, { x: b.x - pad, y: Math.max(0, b.y - pad), width: b.width + 2 * pad, height: Math.min(b.height + 2 * pad, page.viewportSize()!.height - Math.max(0, b.y - pad)) }, OUT_48);
   });
 }

@@ -9,7 +9,8 @@ import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { UploadFailuresModal, UploadFailure } from '../components/UploadFailuresModal';
 import { PageNamingStep } from '../components/PageNamingStep';
 import { AddFilesButton } from '../components/documents/AddFilesButton';
-import { readSheet, runWithConcurrency, applyReadToPage, aiAutoNameEnabled, warmupAi, getAiIdleTimeoutMs, waitForAiReady, type AiScanProgress } from '../utils/aiSheets';
+import { readPagesWithClaude } from '../utils/aiPageInput';
+import { applyReadToPage, aiAutoNameEnabled, aiScanBlocker, aiScanSummary, type AiPageImages, type AiScanProgress } from '../utils/aiSheets';
 import { composePageName } from '../utils/sheetNaming';
 import { useToast } from '../components/Toast';
 
@@ -54,40 +55,23 @@ export const NewProject: React.FC = () => {
   const [planSetId, setPlanSetId] = useState<string | null>(null);
   const [pendingPages, setPendingPages] = useState<PendingPage[]>([]);
   const [pageThumbnails, setPageThumbnails] = useState<Record<string, string>>({});
-  // Transient medium-res per-page images for AI reading (kept so the manual
-  // "AI Scan" button can re-run reads without re-rendering the PDF).
-  const [aiImages, setAiImages] = useState<Record<string, string>>({});
+  // Full-size AI images for pages whose PDF could not be stored (AI Scan
+  // renders the others from the stored PDF; see utils/aiPageInput.ts).
+  const [aiImages, setAiImages] = useState<Record<string, AiPageImages>>({});
 
-  // Manual "AI Scan" — load the model on demand, then read every page.
+  // Manual "AI Scan" — Claude reads every page.
   const handleAiScan = async (report: (p: AiScanProgress) => void) => {
     report({ phase: 'loading' });
-    const idleMs = await getAiIdleTimeoutMs();
-    await warmupAi(idleMs);
-    const ready = await waitForAiReady(() => report({ phase: 'loading' }));
-    if (!ready) {
-      toast('AI model unavailable.', { type: 'error' });
+    const blocker = await aiScanBlocker();
+    if (blocker) {
+      toast(blocker, { type: 'error' });
       return;
     }
     const pages = pendingPages;
-    let count = 0;
-    report({ phase: 'scanning', done: 0, total: pages.length });
-    const reads = await runWithConcurrency(
-      pages.map(pg => async () => {
-        const result = await readSheet({
-          imageId: aiImages[pg.id] ? undefined : (pg.imageId || undefined),
-          imageBase64: aiImages[pg.id] || (pg.imageId ? undefined : pageThumbnails[pg.thumbnailId]),
-          embeddedText: pg.extractedText,
-          idleTimeoutMs: idleMs,
-        });
-        count++;
-        report({ phase: 'scanning', done: count, total: pages.length });
-        return result;
-      }),
-      3,
-    );
+    const { reads, noImage } = await readPagesWithClaude(pages, aiImages, report);
     setPendingPages(pages.map((pg, i) => (reads[i] ? applyReadToPage(pg, reads[i]!) : pg)));
-    const hits = reads.filter(Boolean).length;
-    toast(`AI read ${hits} of ${pages.length} page${pages.length === 1 ? '' : 's'}.`, { type: hits ? 'success' : 'error' });
+    const summary = aiScanSummary(reads.filter(Boolean).length, pages.length, noImage);
+    toast(summary.message, { type: summary.type });
     report({ phase: 'done' });
   };
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -224,12 +208,10 @@ export const NewProject: React.FC = () => {
 
       const extractedPages: PendingPage[] = [];
       const thumbnails: Record<string, string> = {};
-      // Transient per-page medium-res images for AI reading (not stored). Only
-      // rendered when the local model is available + auto-naming is on.
-      const aiImages: Record<string, string> = {};
-      // Render the AI image whenever auto-naming is on (independent of whether
-      // the model is up right now) so the manual "AI Scan" button always has a
-      // good image to send later. The auto pass additionally requires readiness.
+      // Transient full-size AI images (not stored), rendered here only when AI
+      // sheet reading is on and the source PDF could not be stored: otherwise
+      // AI Scan renders them from the stored PDF.
+      const aiImages: Record<string, AiPageImages> = {};
       const aiWanted = aiAutoNameEnabled();
       const failures: Array<{ fileName: string; pageNum: number | null; reason: string }> = [];
       let totalExpected = 0;
@@ -274,7 +256,7 @@ export const NewProject: React.FC = () => {
           const generator = loadPdfPagesGenerator(file, (status, current, total) => {
             if (total > 0) fileExpected = total;
             setProgress(prev => ({ ...prev, status, current, total }));
-          }, undefined, { includeFullPageRaster: !sourcePdfFileId, includeAiImage: aiWanted });
+          }, undefined, { includeFullPageRaster: !sourcePdfFileId, includeAiImage: aiWanted && !sourcePdfFileId });
 
           for await (const pageData of generator) {
             fileYielded++;
@@ -322,7 +304,7 @@ export const NewProject: React.FC = () => {
               };
 
               extractedPages.push(newPage);
-              if (pageData.aiImageDataUrl) aiImages[newPage.id] = pageData.aiImageDataUrl;
+              if (pageData.aiImageDataUrl) aiImages[newPage.id] = { page: pageData.aiImageDataUrl, details: pageData.aiDetailDataUrls ?? [] };
 
               project.pages.push({
                 id: newPage.id,

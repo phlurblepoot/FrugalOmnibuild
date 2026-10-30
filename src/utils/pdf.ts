@@ -75,11 +75,13 @@ export interface PdfPageImage {
   height: number;
   pageNum: number;
   extractedText?: string;
-  /** Medium-resolution JPEG (~1600px long side) for local AI sheet reading.
-   *  Only produced when the caller opts in via includeAiImage; transient (not
-   *  stored) — the 400px thumbnail is too low-res for the model to read a title
-   *  block, so this is sent to /api/ai/read-sheet instead. */
+  /** Medium-resolution JPEG (1568px long side, the most Claude looks at) for
+   *  AI sheet reading. Only produced when the caller opts in via
+   *  includeAiImage; transient (not stored) — the 400px thumbnail is too
+   *  low-res to read a title block, so this is sent to /api/ai/read-sheet. */
   aiImageDataUrl?: string;
+  /** The sheet in quarters at twice the detail (see AiSheetImages). */
+  aiDetailDataUrls?: string[];
   /** Populated when this page could not be rendered. dataUrl will be empty. */
   error?: string;
 }
@@ -237,9 +239,147 @@ export function cleanDescriptionText(raw: string): string {
 export interface LoadPdfPagesOptions {
   /** When true, also rasterize each page to a JPEG dataUrl (legacy path). Defaults to false. */
   includeFullPageRaster?: boolean;
-  /** When true, also produce a ~1600px `aiImageDataUrl` per page for local AI
-   *  sheet reading. Defaults to false (skips the extra render when AI is off). */
+  /** When true, also produce `aiImageDataUrl` + `aiDetailDataUrls` per page
+   *  for AI sheet reading. Defaults to false (skips the extra renders when AI is off). */
   includeAiImage?: boolean;
+}
+
+/** Claude scales images down to about this long edge, so larger is wasted. */
+const AI_IMAGE_LONG_EDGE = 1568;
+
+/** The images Claude reads one sheet from. */
+export interface AiSheetImages {
+  /** The whole sheet, 1568 px on the long edge. */
+  page: string;
+  /** The sheet in quarters (top-left, top-right, bottom-left, bottom-right),
+   *  each 1568 px on its long edge: twice the detail of `page`, so small print
+   *  reads wherever it is on the sheet and whichever way it is turned. */
+  details: string[];
+}
+
+/** Draws the region (x, y, w, h) of a sheet, in sheet pixels, onto `ctx` at scale `s`. */
+type DrawRegion = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, s: number) => Promise<void> | void;
+
+/** Claude's images for a sheet of `width` × `height`. Always full size, never
+ *  a preview thumbnail. */
+async function aiImagesFrom(width: number, height: number, draw: DrawRegion): Promise<AiSheetImages> {
+  const render = async (x: number, y: number, w: number, h: number): Promise<string> => {
+    const s = Math.min(1, AI_IMAGE_LONG_EDGE / Math.max(w, h));
+    const aiCanvas = document.createElement('canvas');
+    aiCanvas.width = Math.round(w * s);
+    aiCanvas.height = Math.round(h * s);
+    const aiCtx = aiCanvas.getContext('2d');
+    if (!aiCtx) return '';
+    aiCtx.fillStyle = 'white';
+    aiCtx.fillRect(0, 0, aiCanvas.width, aiCanvas.height);
+    await draw(aiCtx, x, y, w, h, s);
+    const url = aiCanvas.toDataURL('image/jpeg', 0.72);
+    // Free the backing store now: a scan renders many pages in a row.
+    aiCanvas.width = 0;
+    aiCanvas.height = 0;
+    return url;
+  };
+  const page = await render(0, 0, width, height);
+  const hw = width / 2, hh = height / 2;
+  const details: string[] = [];
+  for (const [x, y] of [[0, 0], [hw, 0], [0, hh], [hw, hh]]) {
+    const d = await render(x, y, hw, hh);
+    if (d) details.push(d);
+  }
+  return { page, details };
+}
+
+/** Claude's images for a PDF page: drawn from `raster` when the page is
+ *  already rendered at `scale`, otherwise rendered straight from the PDF. */
+export function renderAiImages(page: any, scale = 2.0, raster?: HTMLCanvasElement): Promise<AiSheetImages> {
+  const viewport = page.getViewport({ scale });
+  return aiImagesFrom(viewport.width, viewport.height, async (ctx, x, y, w, h, s) => {
+    if (raster) {
+      ctx.drawImage(raster, x, y, w, h, 0, 0, ctx.canvas.width, ctx.canvas.height);
+    } else {
+      const vp = page.getViewport({ scale: scale * s });
+      await page.render({ canvasContext: ctx, viewport: vp, transform: [1, 0, 0, 1, -x * s, -y * s], intent: 'print' } as any).promise;
+    }
+  });
+}
+
+/** How many of a page's text runs `layoutTextOf` lists, largest first. */
+const LAYOUT_TEXT_RUNS = 80;
+
+/**
+ * The page's largest text, with where it sits and which way it is turned, one
+ * run per line, e.g. `[x 91%, y 96%, turned 90°, size 24] A-201`. Sheet
+ * numbers, sheet titles and drawing labels ("FRONT ELEVATION") are printed
+ * big, so this lists them wherever the title block is and however the text is
+ * turned, while leaving out the small print of general notes. Empty for a
+ * scanned page with no text layer.
+ */
+export async function layoutTextOf(page: any): Promise<string> {
+  const viewport = page.getViewport({ scale: 1 });
+  const content = await page.getTextContent();
+  // A run is a line of text; `endX`/`endY` is where its last piece ends.
+  type Run = { x: number; y: number; angle: number; size: number; str: string; endX: number; endY: number; closed: boolean };
+  const runs: Run[] = [];
+  for (const item of content.items as any[]) {
+    const str = (item.str ?? '').trim();
+    if (!str || !item.transform) continue;
+    // Item → viewport space (top-left origin, page rotation applied).
+    const [a, b, , , e, f] = pdfjsLib.Util.transform(viewport.transform, item.transform);
+    const size = Math.hypot(a, b);
+    if (!size) continue;
+    // Screen angle the text runs at: 0 = left to right, 90 = bottom to top.
+    const angle = Math.round(((-Math.atan2(b, a) * 180) / Math.PI + 360) % 360);
+    const endX = e + (a / size) * (item.width ?? 0);
+    const endY = f + (b / size) * (item.width ?? 0);
+    const prev = runs[runs.length - 1];
+    // pdf.js splits a line into several pieces: join a piece to the run before
+    // it when it has the same size and direction and starts where that ended.
+    if (prev && !prev.closed && prev.angle === angle && Math.abs(prev.size - size) < 0.5
+        && Math.hypot(e - prev.endX, f - prev.endY) < size * 1.5) {
+      prev.str += ' ' + str;
+      prev.endX = endX;
+      prev.endY = endY;
+      prev.closed = !!item.hasEOL;
+      continue;
+    }
+    runs.push({ x: e, y: f, angle, size, str, endX, endY, closed: !!item.hasEOL });
+  }
+  const pct = (v: number, of: number) => Math.max(0, Math.min(100, Math.round((v / of) * 100)));
+  return runs
+    .filter(r => r.str.replace(/\s/g, '').length > 0)
+    .sort((r1, r2) => r2.size - r1.size)
+    .slice(0, LAYOUT_TEXT_RUNS)
+    .sort((r1, r2) => r1.y - r2.y || r1.x - r2.x)
+    .map(r => `[x ${pct(r.x, viewport.width)}%, y ${pct(r.y, viewport.height)}%${r.angle ? `, turned ${r.angle}°` : ''}, size ${Math.round(r.size)}] ${r.str.replace(/\s+/g, ' ').slice(0, 120)}`)
+    .join('\n');
+}
+
+/** Claude's images and the page's large text, for a page stored as a source
+ *  PDF. `cache` keeps each PDF open across the pages of one scan. */
+export async function renderAiImagesFromSourcePdf(
+  fileUrl: string, pageNum: number, cache: Map<string, Promise<any>>,
+): Promise<AiSheetImages & { layoutText: string }> {
+  let doc = cache.get(fileUrl);
+  if (!doc) {
+    doc = pdfjsLib.getDocument({ url: fileUrl }).promise;
+    cache.set(fileUrl, doc);
+  }
+  const page = await (await doc).getPage(pageNum);
+  try {
+    const images = await renderAiImages(page);
+    const layoutText = await layoutTextOf(page).catch(() => '');
+    return { ...images, layoutText };
+  } finally {
+    page.cleanup();
+  }
+}
+
+/** Claude's images for an older page stored as a full-size image (not its preview). */
+export async function renderAiImagesFromImage(url: string): Promise<AiSheetImages> {
+  const img = await loadImage(url);
+  return aiImagesFrom(img.naturalWidth, img.naturalHeight, (ctx, x, y, w, h) => {
+    ctx.drawImage(img, x, y, w, h, 0, 0, ctx.canvas.width, ctx.canvas.height);
+  });
 }
 
 export const loadPdfPagesGenerator = async function*(
@@ -348,27 +488,16 @@ export const loadPdfPagesGenerator = async function*(
     const dataUrl = includeFullPageRaster ? canvas.toDataURL('image/jpeg', 0.6) : '';
     const thumbnailDataUrl = thumbCanvas.toDataURL('image/jpeg', 0.5);
 
-    // Medium-res image for local AI reading (the 400px thumbnail can't resolve a
-    // title block). Rendered directly at AI scale for vector pages, or downscaled
-    // from the already-rendered full canvas when we have one.
+    // Full-size images for AI reading (the 400px thumbnail can't resolve a
+    // title block): the whole sheet and its quarters (see AiSheetImages).
+    // Only asked for when the source PDF could not be stored; otherwise AI Scan
+    // renders them from the stored PDF. Cut from the full canvas when we have one.
     let aiImageDataUrl = '';
+    let aiDetailDataUrls: string[] = [];
     if (includeAiImage) {
-      const aiScale = Math.min(1, 1600 / Math.max(viewport.width, viewport.height));
-      const aiCanvas = document.createElement('canvas');
-      aiCanvas.width = Math.round(viewport.width * aiScale);
-      aiCanvas.height = Math.round(viewport.height * aiScale);
-      const aiCtx = aiCanvas.getContext('2d');
-      if (aiCtx) {
-        aiCtx.fillStyle = 'white';
-        aiCtx.fillRect(0, 0, aiCanvas.width, aiCanvas.height);
-        if (needsFullRender) {
-          aiCtx.drawImage(canvas, 0, 0, aiCanvas.width, aiCanvas.height);
-        } else {
-          const aiVp = page.getViewport({ scale: scale * aiScale });
-          await page.render({ canvasContext: aiCtx, viewport: aiVp, intent: 'print' } as any).promise;
-        }
-        aiImageDataUrl = aiCanvas.toDataURL('image/jpeg', 0.72);
-      }
+      const ai = await renderAiImages(page, scale, needsFullRender ? canvas : undefined);
+      aiImageDataUrl = ai.page;
+      aiDetailDataUrls = ai.details;
     }
 
     page.cleanup();
@@ -377,6 +506,7 @@ export const loadPdfPagesGenerator = async function*(
       dataUrl,
       thumbnailDataUrl,
       aiImageDataUrl,
+      aiDetailDataUrls,
       width: viewport.width,
       height: viewport.height,
       pageNum: i,

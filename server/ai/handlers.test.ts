@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { handleStatus, handleReadSheet, handleMatchSheet, handleWarmup, handleTranscribeRegion } from './handlers';
+import { handleStatus, handleReadSheet, handleMatchSheet, handleWarmup, handleTranscribeRegion, cleanSetContext } from './handlers';
 import type { AiRunner, SheetRead, SheetMatch, TranscribeResult } from './types';
 
 const okRead: SheetRead = { sheetNumber: 'A-201', sheetTitle: 'Second Floor Plan', confidence: 0.9 };
@@ -10,7 +10,7 @@ const fakeRunner = (over: Partial<AiRunner> = {}): AiRunner => ({
   configured: () => true,
   state: () => Promise.resolve('ready'),
   warmup: () => {},
-  info: () => ({ model: 'fake', device: 'cuda' }),
+  info: () => ({ model: 'fake', device: 'cloud' }),
   readSheet: () => Promise.resolve(okRead),
   matchSheet: () => Promise.resolve(okMatch),
   transcribeRegion: () => Promise.resolve(okTranscribe),
@@ -21,7 +21,7 @@ const loadImage = (id: string) => (id === 'img1' ? Buffer.from('jpeg') : null);
 
 describe('handleStatus', () => {
   it('reports availability + info + ready state', async () => {
-    expect(await handleStatus(fakeRunner())).toEqual({ status: 200, body: { available: true, state: 'ready', model: 'fake', device: 'cuda' } });
+    expect(await handleStatus(fakeRunner())).toEqual({ status: 200, body: { available: true, state: 'ready', model: 'fake', device: 'cloud', provider: 'claude', lastError: null } });
   });
   it('reports idle state when configured but not yet loaded', async () => {
     const r = await handleStatus(fakeRunner({ state: () => Promise.resolve('idle') }));
@@ -54,6 +54,25 @@ describe('handleReadSheet', () => {
   it('404 when the imageId is unknown', async () => {
     const r = await handleReadSheet(fakeRunner(), loadImage, { imageId: 'nope' });
     expect(r.status).toBe(404);
+  });
+  it('passes up to four detail images, the layout text and a cleaned set context along', async () => {
+    let got: any;
+    const runner = fakeRunner({ readSheet: (input) => { got = input; return Promise.resolve(okRead); } });
+    const b64 = (t: string) => Buffer.from(t).toString('base64');
+    await handleReadSheet(runner, loadImage, {
+      imageId: 'img1',
+      detailBase64s: [b64('q1'), b64('q2'), 42 as any, b64('q3'), b64('q4'), b64('q5')],
+      layoutText: '[x 50%, y 90%, size 30] A-1',
+      setContext: { notes: '  right strip  ', sheets: [{ number: 'A-1', title: 'Plan' }, { nope: true }, 'x'] },
+    });
+    expect(got.details.map((d: Buffer) => d.toString())).toEqual(['q1', 'q2', 'q3']);
+    expect(got.layoutText).toBe('[x 50%, y 90%, size 30] A-1');
+    expect(got.setContext).toEqual({ notes: 'right strip', sheets: [{ number: 'A-1', title: 'Plan' }] });
+  });
+  it('502 with the runner\'s message and code when Claude fails', async () => {
+    const err = Object.assign(new Error('Claude usage or rate limit reached.'), { code: 'rate_limit' });
+    const r = await handleReadSheet(fakeRunner({ readSheet: () => Promise.reject(err) }), loadImage, { imageId: 'img1' });
+    expect(r).toEqual({ status: 502, body: { error: 'Claude usage or rate limit reached.', code: 'rate_limit' } });
   });
   it('502 when the model throws', async () => {
     const r = await handleReadSheet(fakeRunner({ readSheet: () => Promise.reject(new Error('boom')) }), loadImage, { imageId: 'img1' });
@@ -125,5 +144,19 @@ describe('handleWarmup', () => {
   it('503 when not configured', async () => {
     const r = await handleWarmup(fakeRunner({ configured: () => false }), {});
     expect(r.status).toBe(503);
+  });
+});
+
+describe('cleanSetContext', () => {
+  it('drops anything malformed and caps sizes', () => {
+    expect(cleanSetContext(undefined)).toBeUndefined();
+    expect(cleanSetContext('notes')).toBeUndefined();
+    expect(cleanSetContext({ notes: '   ', sheets: [] })).toBeUndefined();
+    const many = Array.from({ length: 60 }, (_, i) => ({ number: `A-${i}`, title: 'x'.repeat(300) }));
+    const c = cleanSetContext({ notes: 'n'.repeat(5000), sheets: many })!;
+    expect(c.notes).toHaveLength(1000);
+    expect(c.sheets).toHaveLength(40);
+    expect(c.sheets![0].number).toBe('A-20');
+    expect(c.sheets![0].title).toHaveLength(100);
   });
 });

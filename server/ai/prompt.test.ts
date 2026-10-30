@@ -12,8 +12,33 @@ describe('buildReadPrompt', () => {
     const p = buildReadPrompt('A-201 SECOND FLOOR PLAN');
     expect(p).toContain('A-201 SECOND FLOOR PLAN');
   });
-  it('omits the hint section when there is no embedded text', () => {
-    expect(buildReadPrompt('')).not.toMatch(/reference/i);
+  it('omits the text sections when there is no text', () => {
+    const p = buildReadPrompt('');
+    expect(p).not.toMatch(/All of the page's text/);
+    expect(p).not.toMatch(/largest text on this page/);
+    expect(p).not.toMatch(/already read/);
+  });
+  it('assumes no layout: the title block may be anywhere and turned', () => {
+    const p = buildReadPrompt();
+    expect(p).toMatch(/strip down the right edge, a band along the bottom/);
+    expect(p).toMatch(/turned sideways/);
+  });
+  it('asks for a collective title when no sheet title is printed, and "" when no number is', () => {
+    const p = buildReadPrompt();
+    expect(p).toMatch(/If no sheet title is printed, name the sheet from what is drawn on it/);
+    expect(p).toMatch(/Exterior Elevations/);
+    expect(p).toMatch(/no sheet number printed anywhere, give ""/);
+  });
+  it('includes the large text with positions', () => {
+    const p = buildReadPrompt('', '[x 91%, y 96%, turned 90°, size 24] A-201');
+    expect(p).toContain('[x 91%, y 96%, turned 90°, size 24] A-201');
+  });
+  it('carries what earlier sheets of the set taught, but allows a sheet to differ', () => {
+    const p = buildReadPrompt('', '', { notes: 'Number at the foot of the right strip.', sheets: [{ number: 'A-101', title: 'First Floor Plan' }, { number: '', title: 'Cover Sheet' }] });
+    expect(p).toContain('Number at the foot of the right strip.');
+    expect(p).toContain('A-101 First Floor Plan; Cover Sheet');
+    expect(p).toMatch(/cover sheet.*may differ/);
+    expect(p).toMatch(/setNotes/);
   });
 });
 
@@ -30,6 +55,18 @@ describe('parseReadResponse', () => {
   it('clamps confidence to 0..1', () => {
     expect(parseReadResponse('{"sheetNumber":"A1","sheetTitle":"x","confidence":5}').confidence).toBe(1);
     expect(parseReadResponse('{"sheetNumber":"A1","sheetTitle":"x","confidence":-3}').confidence).toBe(0);
+  });
+  it('is not fooled by braces inside strings, and tolerates a code fence', () => {
+    const r = parseReadResponse('```json\n{"sheetNumber":"A-1","sheetTitle":"Plan {Level 2}","confidence":0.7}\n```');
+    expect(r).toMatchObject({ sheetNumber: 'A-1', sheetTitle: 'Plan {Level 2}', confidence: 0.7 });
+  });
+  it('keeps the set notes when given', () => {
+    expect(parseReadResponse('{"sheetNumber":"A-1","sheetTitle":"Plan","confidence":0.9,"setNotes":" Right strip. "}').setNotes).toBe('Right strip.');
+    expect(parseReadResponse('{"sheetNumber":"A-1","sheetTitle":"Plan","confidence":0.9,"setNotes":""}')).not.toHaveProperty('setNotes');
+  });
+  it('treats fields of the wrong type as missing', () => {
+    const r = parseReadResponse('{"sheetNumber":{"v":"A-1"},"sheetTitle":42,"confidence":"high"}');
+    expect(r).toEqual({ sheetNumber: '', sheetTitle: '', discipline: undefined, confidence: 0 });
   });
   it('returns a low-confidence empty read on unparseable output', () => {
     expect(parseReadResponse('the model said nothing useful')).toEqual({ sheetNumber: '', sheetTitle: '', confidence: 0 });

@@ -16,7 +16,7 @@ import { runMigrations } from './server/migrations';
 import { migrations } from './server/migrationList';
 import { registerDataRoutes, registerEmailRoutes } from './server/routes';
 import { registerAiRoutes } from './server/aiRoutes';
-import { getAiRunner } from './server/ai';
+import { getAiSetup } from './server/ai';
 import { NOTIFICATION_EVENT, registerRealtime, userRoom } from './server/realtime/registerRealtime';
 import { Notifier } from './server/notifications';
 import { registerNotificationRoutes } from './server/notificationRoutes';
@@ -603,10 +603,15 @@ async function startServer() {
   sweepUploads(DATA_DIR);
   setInterval(() => sweepUploads(DATA_DIR), 15 * 60_000).unref();
 
+  // Claude reads plan sheets (docs/ai-sheet-reading-runbook.md). The secret is
+  // sealed with the mail key, so the credential store shares mailCrypto.
+  const ai = getAiSetup({ dataDir: DATA_DIR, crypto: mailCrypto, version: APP_VERSION });
   registerAiRoutes(app, {
     dataDir: DATA_DIR,
     authenticateToken,
-    runner: getAiRunner(),
+    requireAdmin,
+    runner: ai.runner,
+    claude: ai,
   });
 
   // Time Entry Routes

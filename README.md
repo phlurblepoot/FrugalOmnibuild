@@ -246,9 +246,16 @@ The server reads a `.env` file in the working folder if there is one. Every vari
 |---|---|
 | `PUSH_CONTACT` | A `mailto:` address or `https:` URL that push services can contact. Defaults to `APP_PUBLIC_URL`. The server makes its own keys on first use. |
 
-**AI sheet reading** (CUDA image only; see [docs/ai-sheet-reading-runbook.md](docs/ai-sheet-reading-runbook.md))
+**AI sheet reading** (Claude; see [docs/ai-sheet-reading-runbook.md](docs/ai-sheet-reading-runbook.md))
 
-`AI_ENABLED`, `AI_MODEL_HF`, `AI_MODEL_PATH`, `AI_MMPROJ_PATH`, `AI_MODELS_DIR`, `LLAMA_CACHE`, `AI_LLAMA_SERVER_BIN`, `AI_HOST`, `AI_PORT`, `AI_GPU_LAYERS`, `AI_TIMEOUT_MS`, `AI_STARTUP_TIMEOUT_MS`. The standard image has no local model, so this feature is off there and sheet names come from page labels and OCR.
+Connect Claude in **Settings → User Preferences → AI Sheet Reading**; no variables are needed. A Claude subscription token is for your own private install; use an API key for anything shared more widely. Without it, sheet names come from page labels and OCR.
+
+| Variable | What it does |
+|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Optional. A Claude credential set on the container instead of in Settings. One pasted in Settings wins. |
+| `CLAUDE_CONFIG_DIR` | Where Claude keeps its sign-in and settings. The image sets `/app/data/claude`. |
+| `AI_TIMEOUT_MS` | How long one page read may take before it gives up. Default `120000`. |
+| `AI_FAKE_CLAUDE` | `1` answers every AI read with a canned reply. Tests only. |
 
 ### Docker
 
@@ -258,8 +265,8 @@ Images are published to the GitHub Container Registry:
 |---|---|
 | `ghcr.io/phlurblepoot/frugalomnibuild:main` | `main`, the stable branch |
 | `ghcr.io/phlurblepoot/frugalomnibuild:testing` | `testing`, the integration branch |
-| `ghcr.io/phlurblepoot/frugalomnibuild:cuda-stable` | `main`, with llama.cpp for AI sheet reading on an NVIDIA GPU |
-| `ghcr.io/phlurblepoot/frugalomnibuild:cuda` | `testing`, the same GPU build |
+
+The `:cuda` and `:cuda-stable` GPU images are retired: from 4.8, Claude reads plan sheets, so the regular image does everything. On Unraid, edit the container and change **Repository** from `…:cuda` to `…:testing` (or from `…:cuda-stable` to `…:main`); the `/models` path, `--gpus` and `NVIDIA_VISIBLE_DEVICES` settings can go.
 
 The app alone:
 
@@ -298,7 +305,7 @@ Moving an existing install to a new server? Start the new one empty, sign in as 
 - [docs/onlyoffice-setup.md](docs/onlyoffice-setup.md): ONLYOFFICE Docs, reverse proxy, connection checks, upgrades, and phone notifications.
 - [docs/mail-setup.md](docs/mail-setup.md): Google, Microsoft 365 and IMAP mail.
 - Backups: [Google Drive backups](docs/mail-setup.md#41-google-drive-backups) and [backups and the key file](docs/mail-setup.md#5-backups-and-the-key-file) in the mail guide, plus **Settings → Backup → Setup guide** in the app. `npm run backup` and `npm run restore` copy a whole data folder from the command line.
-- [docs/ai-sheet-reading-runbook.md](docs/ai-sheet-reading-runbook.md): the GPU image and local AI sheet reading.
+- [docs/ai-sheet-reading-runbook.md](docs/ai-sheet-reading-runbook.md): connecting Claude to read plan sheets.
 
 ---
 
@@ -307,7 +314,8 @@ Moving an existing install to a new server? Start the new one empty, sign in as 
 - **Front end:** React 19, TypeScript, Vite 6, Tailwind CSS 4, React Router, Konva (the takeoff canvas), pdf.js and pdf-lib (reading and writing PDFs), jsPDF, TipTap (the mail composer), Tesseract.js (OCR), lucide-react and Motion.
 - **Server:** Node.js 22+, Express 4, better-sqlite3, Socket.io, jsonwebtoken and bcryptjs, nodemailer and imapflow, web-push, sharp, ExcelJS and SheetJS.
 - **Documents:** ONLYOFFICE Docs Community Edition as a second container.
-- **Deploy:** Docker on `node:22-bookworm-slim`; a CUDA image adds llama.cpp.
+- **AI:** the Claude Agent SDK, which reads plan sheets with Claude.
+- **Deploy:** Docker on `node:22-bookworm-slim`.
 
 ## Project layout
 
