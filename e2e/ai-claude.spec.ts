@@ -79,6 +79,13 @@ test('admin connects Claude with a token, tests it, sees only the last 4, and di
   await card.getByRole('button', { name: 'Test connection' }).click();
   await expect(card.getByRole('status')).toHaveText('Claude answered (Haiku 5.5).');
 
+  // Usage: the plan's limits as reported with that call (the fake reports 34%
+  // of the 5-hour window and 12% of the week), and the page-scan totals.
+  const usage = card.getByTestId('claude-usage');
+  await expect(usage.getByTestId('claude-limit-5h')).toContainText('34% used');
+  await expect(usage.getByTestId('claude-limit-7d')).toContainText('12% used');
+  await expect(usage.getByTestId('claude-usage-table')).toContainText('All time');
+
   // The secret never comes back, to the page or the API.
   await expect(page.locator('body')).not.toContainText(GOOD.slice(0, 24));
   const conn = await request.get('/api/ai/claude', { headers: asAdmin(token) });

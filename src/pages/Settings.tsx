@@ -32,6 +32,14 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.1',
+    date: 'October 30, 2026',
+    changes: [
+      'New: Settings › User Preferences › AI Sheet Reading has a Usage section (admins). With a Claude subscription it shows how much of your 5-hour and weekly limits is used and when each resets, as Anthropic reports them with each page scan, and under each, what this app\'s page scans used in that window (pages and tokens). Those limits cover your whole Claude account; Anthropic does not split them by app.',
+      'Usage also lists page scans today, in the last 7 days, this month and all time: pages, tokens, and their value at API prices (what an API key pays; with a key, the cost).',
+    ],
+  },
+  {
     version: '4.8.0.3',
     date: 'October 30, 2026',
     changes: [

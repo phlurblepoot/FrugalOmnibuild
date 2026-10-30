@@ -4,6 +4,7 @@ import { handleStatus, handleReadSheet, handleMatchSheet, handleWarmup, handleTr
 import type { AiRunner } from './ai/types';
 import type { ClaudeRunner } from './ai/claudeRunner';
 import { CLAUDE_MODELS, isClaudeModel, validateSecret, type ClaudeCredentialStore } from './ai/claudeCredentials';
+import type { UsageStore } from './ai/usageStore';
 
 export interface AiRouteDeps {
   dataDir: string;
@@ -11,7 +12,7 @@ export interface AiRouteDeps {
   requireAdmin: express.RequestHandler;
   runner: AiRunner;
   /** The Claude connection the admin manages in Settings. */
-  claude: { store: ClaudeCredentialStore; runner: Pick<ClaudeRunner, 'testConnection'> };
+  claude: { store: ClaudeCredentialStore; runner: Pick<ClaudeRunner, 'testConnection'>; usage?: UsageStore };
 }
 
 export function registerAiRoutes(app: express.Express, deps: AiRouteDeps): void {
@@ -72,6 +73,13 @@ export function registerAiRoutes(app: express.Express, deps: AiRouteDeps): void 
     if (!isClaudeModel(model)) return res.status(400).json({ error: 'unknown model' });
     claude.store.setModel(model);
     res.json(connection());
+  });
+
+  // What scans used (pages, tokens, value at API prices), and the plan's
+  // limits as Anthropic last reported them. No call to Claude.
+  app.get('/api/ai/claude/usage', ...admin, (_req, res) => {
+    if (!claude.usage) return res.status(404).json({ error: 'usage not tracked' });
+    res.json(claude.usage.summary());
   });
 
   app.post('/api/ai/claude/test', ...admin, async (_req, res) => {

@@ -40,6 +40,16 @@ export function createFakeClaudeQuery(): QueryFn {
     } else {
       answer = '{"ok": true}';
     }
-    yield { ...base, type: 'result', subtype: 'success', is_error: false, result: answer } as unknown as SDKMessage;
+    // Like a subscription: the plan's limits with each call, then the call's token use.
+    const now = Math.floor(Date.now() / 1000);
+    yield { ...base, type: 'rate_limit_event', rate_limit_info: {
+      status: 'allowed', rateLimitType: 'five_hour', resetsAt: now + 7200,
+      unifiedWindows: { five_hour: { utilization: 0.34, resetsAt: now + 7200, status: 'allowed' }, seven_day: { utilization: 0.12, resetsAt: now + 3 * 86400, status: 'allowed' } },
+    } } as unknown as SDKMessage;
+    const model = options?.model ?? 'claude-opus-5-5';
+    yield {
+      ...base, type: 'result', subtype: 'success', is_error: false, result: answer,
+      modelUsage: { [model]: { inputTokens: 15000, outputTokens: 400, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.068 } },
+    } as unknown as SDKMessage;
   };
 }

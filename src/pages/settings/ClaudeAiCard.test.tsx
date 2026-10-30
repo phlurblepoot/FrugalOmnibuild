@@ -18,7 +18,7 @@ const on = { ...off, connected: true, source: 'token', last4: 'WXYZ', connectedA
 
 const h = vi.hoisted(() => ({
   getAiStatus: vi.fn(),
-  api: { get: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), setModel: vi.fn(), test: vi.fn() },
+  api: { get: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), setModel: vi.fn(), test: vi.fn(), usage: vi.fn() },
   toast: vi.fn(),
   confirm: vi.fn(),
 }));
@@ -41,6 +41,13 @@ import { ClaudeAiCard } from './ClaudeAiCard';
 
 beforeEach(() => {
   Object.values(h.api).forEach(f => f.mockReset());
+  h.api.usage.mockResolvedValue({
+    today: { pages: 0, calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+    last7Days: { pages: 0, calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+    thisMonth: { pages: 0, calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+    allTime: { pages: 0, calls: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0 },
+    plan: null, inFiveHourWindow: null, inSevenDayWindow: null,
+  });
   h.toast.mockReset();
   h.confirm.mockReset();
   h.getAiStatus.mockReset().mockResolvedValue({ available: false, model: 'claude-opus-5-5', device: 'none', state: 'off' });
@@ -96,6 +103,22 @@ describe('ClaudeAiCard', () => {
     fireEvent.change(await screen.findByLabelText('Claude Code token'), { target: { value: 'nope' } });
     fireEvent.click(screen.getByRole('button', { name: /Connect/ }));
     await waitFor(() => expect(h.toast).toHaveBeenCalledWith('That is too short to be a token or key.', { type: 'error' }));
+  });
+
+  it('shows usage once connected, and refreshes it after a test', async () => {
+    h.api.get.mockResolvedValue(on);
+    h.api.test.mockResolvedValue({ ok: true, model: 'claude-opus-5-5' });
+    render(<ClaudeAiCard isAdmin />);
+    expect(await screen.findByTestId('claude-usage')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Test connection/ }));
+    await waitFor(() => expect(h.api.usage).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows no usage before Claude is connected', async () => {
+    h.api.get.mockResolvedValue(off);
+    render(<ClaudeAiCard isAdmin />);
+    await screen.findByText('Not connected');
+    expect(screen.queryByTestId('claude-usage')).toBeNull();
   });
 
   it('tests the connection and shows the answer or the reason', async () => {
