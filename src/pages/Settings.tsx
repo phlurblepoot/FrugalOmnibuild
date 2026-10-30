@@ -32,6 +32,13 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.0.2',
+    date: 'October 30, 2026',
+    changes: [
+      'Fix: the Docker image build failed from 4.7.0.1 on (it linked the Alpine build of the Claude Code program, which cannot run on this image). The image now uses the right one and leaves out the unused Alpine copy (about 280 MB).',
+    ],
+  },
+  {
     version: '4.8.0.1',
     date: 'October 29, 2026',
     changes: [

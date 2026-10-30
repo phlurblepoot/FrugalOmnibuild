@@ -15,8 +15,11 @@ WORKDIR /app
 # Copy package files and install dependencies
 # --mount=type=cache persists the npm download cache across builds (BuildKit)
 COPY package*.json ./
+# npm also installs the musl (Alpine) build of the Claude Code binary, since the
+# lockfile can't tell glibc from musl; this image is Debian (glibc), so drop it.
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci
+    npm ci \
+    && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-*-musl
 
 # Copy the rest of the application code
 COPY . .
@@ -30,7 +33,8 @@ RUN npm run build
 # `docker exec -it <container> claude setup-token` (or `claude login`) on the
 # server. Its sign-in and settings live on the data volume, so they survive
 # image updates. See docs/ai-sheet-reading-runbook.md.
-RUN ln -s "$(ls -d /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude | head -n1)" /usr/local/bin/claude \
+RUN ARCH="$(node -p process.arch)" \
+    && ln -s "/app/node_modules/@anthropic-ai/claude-agent-sdk-linux-${ARCH}/claude" /usr/local/bin/claude \
     && claude --version
 ENV CLAUDE_CONFIG_DIR=/app/data/claude
 
