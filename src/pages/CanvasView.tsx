@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom';
-import { Hand, Ruler, RulerDimensionLine, Square, SquareMinus, Settings, Trash2, Download, ArrowLeft, Layers, Plus, Hash, Undo, Redo, ChevronLeft, ChevronRight, Menu, StickyNote, HelpCircle, BoxSelect, AlignStartVertical, AlignEndVertical, History } from 'lucide-react';
+import { Hand, Ruler, RulerDimensionLine, Square, SquareMinus, Settings, Trash2, Download, ArrowLeft, Layers, Plus, Hash, Undo, Redo, ChevronLeft, ChevronRight, Menu, StickyNote, HelpCircle, BoxSelect, AlignStartVertical, AlignEndVertical, History, GitCompare } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { v4 as uuidv4 } from 'uuid';
 import { PdfCanvas } from '../components/PdfCanvas';
@@ -21,6 +21,7 @@ import { computeRevisionModel, effectiveSheetId } from '../utils/planSets';
 import { summarizeSelection } from '../utils/segmentValue';
 import { measurementMultiplier, multiplierPatch, multipliersMatch } from '../utils/multiplier';
 import { MultiplierModal } from '../components/canvas/MultiplierModal';
+import { PlanSetCompare } from '../components/PlanSetCompare';
 import { computeTakeoffTotals } from './project/proposal/proposalGenerator';
 import { CLIENT_SESSION_ID } from '../utils/clientSession';
 import { NumberInput } from '../components/ui';
@@ -137,15 +138,17 @@ const CanvasViewInner: React.FC = () => {
   // frozen measurements still render. The current/unique revision stays fully
   // editable. We derive this positionally via computeRevisionModel(project,'').
   const supersededInfo = useMemo(() => {
-    if (!project || !pageId) return { isSuperseded: false, revNumber: 1, currentPageId: null as string | null };
+    if (!project || !pageId) return { isSuperseded: false, revNumber: 1, revCount: 1, currentPageId: null as string | null };
     const model = computeRevisionModel(project, '');
     const isSuperseded = model.status(pageId) === 'superseded';
     const revNumber = model.revisionNumberByPageId.get(pageId) || 1;
     const page = project.pages.find(p => p.id === pageId);
     const currentPageId = page ? (model.latestPageIdBySheet.get(effectiveSheetId(page)) ?? null) : null;
-    return { isSuperseded, revNumber, currentPageId };
+    const revCount = page ? (model.revisionsBySheet.get(effectiveSheetId(page))?.length ?? 1) : 1;
+    return { isSuperseded, revNumber, revCount, currentPageId };
   }, [project, pageId]);
   const isSupersededRevision = supersededInfo.isSuperseded;
+  const [showCompare, setShowCompare] = useState(false);
 
   // Unified read-only flag: phones OR a frozen older revision. Used to gate all
   // drawing-tool selection + drawing/scale handlers below.
@@ -617,6 +620,8 @@ const CanvasViewInner: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Compare is full screen and has its own keys (Escape, arrow nudges).
+      if (showCompare) return;
       // Don't intercept if user is typing in an input or textarea
       if (
         document.activeElement?.tagName === 'INPUT' ||
@@ -725,7 +730,7 @@ const CanvasViewInner: React.FC = () => {
   }, [selectedMeasurementId, selectedSegmentIdx, page, project, history, redoStack, aggregatedMeasurements,
       showShortcutsHelp, showScaleModal, showDeleteConfirm, showTakeoffModal,
       heightsModalMeasurementId, multiplierModalMeasurementId, editingTakeoff, toolDisabledMessage, takeoffToDelete,
-      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure]);
+      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure, showCompare]);
 
   // When nothing is selected, drawing tools are disabled — reset to pan so the user isn't stuck.
   useEffect(() => {
@@ -2068,6 +2073,14 @@ const CanvasViewInner: React.FC = () => {
               <span className="text-sm leading-snug flex-1 font-medium">
                 Viewing Rev {supersededInfo.revNumber} — read-only history
               </span>
+              <button
+                data-testid="banner-compare-revisions"
+                onClick={() => setShowCompare(true)}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-white/15 text-white text-xs font-semibold hover:bg-white/25 transition-colors flex items-center gap-1.5"
+              >
+                <GitCompare size={14} />
+                Compare
+              </button>
               {supersededInfo.currentPageId && supersededInfo.currentPageId !== pageId && (
                 <button
                   data-testid="goto-current-revision"
@@ -2274,6 +2287,16 @@ const CanvasViewInner: React.FC = () => {
               >
                 <HelpCircle size={20} />
               </button>
+              {supersededInfo.revCount > 1 && (
+                <button
+                  data-testid="canvas-compare-revisions"
+                  onClick={() => setShowCompare(true)}
+                  className="p-2 rounded-lg transition-colors flex-shrink-0 active:scale-95 text-ink-soft hover:bg-hover hover:text-accent-600"
+                  title={`Compare revisions of this sheet (${supersededInfo.revCount})`}
+                >
+                  <GitCompare size={20} />
+                </button>
+              )}
               <div className="h-6 w-px bg-edge mx-0.5 md:mx-1 flex-shrink-0" />
               <button
                 data-testid="btn-multi-select-toggle"
@@ -2829,6 +2852,14 @@ const CanvasViewInner: React.FC = () => {
       })()}
       {/* Keyboard Shortcuts Help Modal */}
       <KeyboardShortcutsModal open={showShortcutsHelp} onClose={() => setShowShortcutsHelp(false)} />
+      {showCompare && pageId && (
+        <PlanSetCompare
+          project={project}
+          pageId={pageId}
+          onClose={() => setShowCompare(false)}
+          onOpenPage={(pid) => { setShowCompare(false); if (pid !== pageId) navigate(`/project/${project.id}/page/${pid}`); }}
+        />
+      )}
       {/* Tool Disabled Message Modal */}
       <ToolDisabledModal message={toolDisabledMessage} onClose={() => setToolDisabledMessage(null)} />
     </div>

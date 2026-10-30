@@ -32,6 +32,20 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.1.1',
+    date: 'October 30, 2026',
+    changes: [
+      'Compare revisions shows the sheets full size, drawn from the stored PDF (or the full-size image on older pages), instead of the small blurry preview, so you can zoom in and read dimensions and notes. A page that only ever kept a preview says so.',
+      'Compare lines the two sheets up for you, so a sheet that was reprinted with the drawing shifted still overlays properly. If it can\'t find a match, or you want to fine-tune, Align lets you nudge the newer sheet (arrow keys, Shift for bigger steps) and adjust its size; your alignment is remembered for that pair.',
+      'Difference view now shows what was removed in red and what was added in blue, with everything unchanged faded to light grey. Small rendering differences no longer light up as changes.',
+      'Side by side now zooms and pans both sheets together, lined up the same way, so you\'re always looking at the same spot on each.',
+      'New: Takeoffs in compare draws each revision\'s takeoffs on the sheet and lists the takeoffs on the newer revision that sit on changed linework. Click one to zoom straight to it.',
+      'The revision pickers show Rev number, plan set, date and sheet, with a swap button; picking the same revision on both sides swaps them instead.',
+      'Compare can now be opened from the drawing screen (the compare button in the top toolbar, when a sheet has more than one revision) and from the read-only banner on an older revision.',
+      'New: fix a page matched to the wrong sheet. Open Revisions (the clock button on any page card, or the revision badge), choose "Wrong sheet?" on a revision, and make it its own sheet or a revision of a different sheet, optionally copying that sheet\'s current takeoffs onto it.',
+    ],
+  },
+  {
     version: '4.8.1',
     date: 'October 30, 2026',
     changes: [

@@ -437,6 +437,14 @@ export function ProjectPagesTab({
                                 />
                               </button>
                               <button
+                                data-testid="page-revisions-button"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRevisionsForPageId(page.id); }}
+                                className="text-ink-faint hover:text-accent-600 p-1 rounded hover:bg-accent-50 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                                title="Revisions — compare, or fix which sheet this page belongs to"
+                              >
+                                <History size={14} />
+                              </button>
+                              <button
                                 onClick={(e) => { e.preventDefault(); handleSharePage(page); }}
                                 className="text-ink-faint hover:text-accent-600 p-1 rounded hover:bg-accent-50 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                                 title="Share page"
@@ -604,6 +612,14 @@ export function ProjectPagesTab({
                             <div className="flex items-center gap-1.5 flex-shrink-0">
                               <PageViewerDots pageId={page.id} />
                               <div className="flex items-center gap-0.5 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                                <button
+                                  data-testid="page-revisions-button"
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowRevisionsForPageId(page.id); }}
+                                  className="text-ink-faint hover:text-accent-600 p-1 rounded hover:bg-accent-50"
+                                  title="Revisions — compare, or fix which sheet this page belongs to"
+                                >
+                                  <History size={14} />
+                                </button>
                                 <button
                                   onClick={(e) => { e.preventDefault(); handleSharePage(page); }}
                                   className="text-ink-faint hover:text-accent-600 p-1 rounded hover:bg-accent-50"
