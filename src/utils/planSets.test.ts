@@ -1,5 +1,5 @@
-import { it, expect } from 'vitest';
-import { computeRevisionModel, effectiveSheetId, carryForwardFrom } from './planSets';
+import { it, expect, describe } from 'vitest';
+import { computeRevisionModel, effectiveSheetId, carryForwardFrom, moveToSheet, wouldBeNewestIn } from './planSets';
 import type { Project, ProjectPage } from '../types';
 
 const page = (o: Partial<ProjectPage>): ProjectPage => ({
@@ -86,4 +86,50 @@ it('effectiveSheetId prefers sheetId, then page number, then id', () => {
   expect(effectiveSheetId(page({ id: 'x', sheetId: 'S', pageNumber: 'A-101' }))).toBe('S');
   expect(effectiveSheetId(page({ id: 'x', pageNumber: 'A-101' }))).toBe('pn:a-101');
   expect(effectiveSheetId(page({ id: 'x', pageNumber: '' }))).toBe('id:x');
+});
+
+describe('moveToSheet', () => {
+  let n = 0;
+  const newId = () => `new${++n}`;
+
+  it('splits a wrongly matched page into its own sheet, keeping its takeoffs', () => {
+    const a1 = page({ id: 'a1', sheetId: 'A', pageNumber: 'A-101', planSetId: 's1' });
+    const a2 = page({ id: 'a2', sheetId: 'A', pageNumber: 'A-102', planSetId: 's2', measurements: [{ id: 'm' } as any] });
+    const out = moveToSheet(proj([a1, a2], sets), 'a2', null, newId);
+    const model = computeRevisionModel(out, '');
+    expect(model.status('a1')).toBe('unique');
+    expect(model.status('a2')).toBe('unique');
+    expect(out.pages.find(p => p.id === 'a2')!.measurements).toHaveLength(1);
+  });
+
+  it('joins a page to another sheet and can copy that sheet\'s current takeoffs', () => {
+    const b1 = page({ id: 'b1', sheetId: 'B', pageNumber: 'A-102', planSetId: 's1', measurements: [{ id: 'mb', type: 'length', points: [{ x: 1, y: 2 }] } as any] });
+    const x2 = page({ id: 'x2', sheetId: 'X', pageNumber: 'A-102', planSetId: 's2', measurements: [{ id: 'wrong' } as any] });
+    expect(wouldBeNewestIn(proj([b1, x2], sets), 'x2', 'B')).toBe(true);
+    const out = moveToSheet(proj([b1, x2], sets), 'x2', 'B', newId, { replaceTakeoffs: true });
+    const model = computeRevisionModel(out, '');
+    expect(model.status('b1')).toBe('superseded');
+    expect(model.status('x2')).toBe('current');
+    const moved = out.pages.find(p => p.id === 'x2')!;
+    expect(moved.measurements.map(m => m.points)).toEqual([[{ x: 1, y: 2 }]]);
+    expect(moved.measurements[0].id).not.toBe('mb');
+  });
+
+  it('does not copy takeoffs onto a page that lands as older history', () => {
+    const b2 = page({ id: 'b2', sheetId: 'B', planSetId: 's2', measurements: [{ id: 'mb', points: [] } as any] });
+    const x1 = page({ id: 'x1', sheetId: 'X', planSetId: 's1', measurements: [{ id: 'keep' } as any] });
+    const out = moveToSheet(proj([b2, x1], sets), 'x1', 'B', newId, { replaceTakeoffs: true });
+    expect(out.pages.find(p => p.id === 'x1')!.measurements.map(m => m.id)).toEqual(['keep']);
+    expect(computeRevisionModel(out, '').status('x1')).toBe('superseded');
+  });
+
+  it('stamps a real sheet id on a legacy sheet grouped by page number', () => {
+    const l1 = page({ id: 'l1', pageNumber: 'S-1', planSetId: 's1' });
+    const x2 = page({ id: 'x2', sheetId: 'X', pageNumber: 'S1', planSetId: 's2' });
+    const out = moveToSheet(proj([l1, x2], sets), 'x2', 'pn:s-1', newId);
+    const [o1, o2] = out.pages;
+    expect(o1.sheetId).toBeTruthy();
+    expect(o1.sheetId).toBe(o2.sheetId);
+    expect(o1.sheetId!.startsWith('pn:')).toBe(false);
+  });
 });

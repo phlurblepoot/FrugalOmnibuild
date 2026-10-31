@@ -11,6 +11,7 @@ import { KeyRound, Sparkles, Unplug, Zap } from 'lucide-react';
 import { Button, Input, Select, StatusPill } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { ClaudeUsagePanel } from './ClaudeUsagePanel';
 import {
   getAiStatus, aiAutoNameEnabled, setAiAutoNameEnabled, claudeApi,
   type AiStatus, type ClaudeConnection, type ClaudeSource,
@@ -39,6 +40,8 @@ export const ClaudeAiCard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
   const [secret, setSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // Bumped after a call to Claude, so the usage panel shows its new numbers.
+  const [usageKey, setUsageKey] = useState(0);
 
   const refresh = useCallback(async () => {
     setStatus(await getAiStatus(true));
@@ -82,6 +85,7 @@ export const ClaudeAiCard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
     const r = await claudeApi.test();
     if (r.ok) setTestResult({ ok: true, text: `Claude answered (${conn?.models.find(m => m.id === r.model)?.label ?? r.model}).` });
     else setTestResult({ ok: false, text: 'error' in r ? r.error : 'Claude did not answer.' });
+    setUsageKey(k => k + 1);
     setStatus(await getAiStatus(true));
   });
 
@@ -213,6 +217,12 @@ export const ClaudeAiCard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
                 {conn.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </Select>
             </div>
+
+            {conn.connected && (
+              <div className="border-t border-edge pt-5">
+                <ClaudeUsagePanel source={conn.source} refreshKey={usageKey} />
+              </div>
+            )}
           </div>
         )}
       </div>

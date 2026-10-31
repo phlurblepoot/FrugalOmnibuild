@@ -7,7 +7,7 @@ import { takeoffPrintName, takeoffPrintsUrl } from '../utils/takeoffPrintNames';
 import { calculateTakeoffTotalCost, evaluateMathExpression } from '../utils/math';
 import { buildTakeoffExcelRows } from './project/takeoffExcel';
 import { loadPdfPagesGenerator } from '../utils/pdf';
-import { computeRevisionModel, orderedPlanSets, summarizePlanSet, effectiveSheetId, carryForwardFrom } from '../utils/planSets';
+import { computeRevisionModel, orderedPlanSets, summarizePlanSet, effectiveSheetId, carryForwardFrom, moveToSheet } from '../utils/planSets';
 import { readPagesWithClaude } from '../utils/aiPageInput';
 import { matchSheet, runWithConcurrency, applyReadToPage, applyMatchToPage, aiAutoNameEnabled, aiScanBlocker, aiScanSummary, type AiPageImages, type AiScanProgress } from '../utils/aiSheets';
 import { composePageName, nextPlaceholderStart } from '../utils/sheetNaming';
@@ -296,6 +296,31 @@ export const ProjectView: React.FC = () => {
 
   const removeNewPlanSetFile = (indexToRemove: number) => {
     setNewPlanSetFiles(newPlanSetFiles.filter((_, index) => index !== indexToRemove));
+  };
+
+  // Fix a wrong sheet match from the Revisions dialog. Optimistic with
+  // rollback. If the dialog was showing the moved page, it keeps showing the
+  // sheet the page left (when that sheet still has pages).
+  const handleMoveToSheet = async (movePageId: string, target: string | null, replaceTakeoffs: boolean) => {
+    if (!project) return;
+    const previous = project;
+    const moved = project.pages.find(p => p.id === movePageId);
+    if (!moved) return;
+    const leftBehind = project.pages.find(p => p.id !== movePageId && effectiveSheetId(p) === effectiveSheetId(moved));
+    const updated = moveToSheet(project, movePageId, target, uuidv4, { replaceTakeoffs });
+    if (updated === project) return;
+    setProject(updated);
+    if (showRevisionsForPageId === movePageId && leftBehind) setShowRevisionsForPageId(leftBehind.id);
+    try {
+      await saveProject(updated);
+      const dest = target ? updated.pages.find(p => p.id !== movePageId && effectiveSheetId(p) === effectiveSheetId(updated.pages.find(pp => pp.id === movePageId)!)) : null;
+      toast(target
+        ? `Moved ${moved.name} to sheet ${dest?.pageNumber || dest?.name || ''}`.trim()
+        : `${moved.name} is now its own sheet`, { type: 'success' });
+    } catch {
+      setProject(previous);
+      toast('Failed to move the page', { type: 'error' });
+    }
   };
 
   // Rename / re-date a plan set in place. Optimistic with rollback.
@@ -2020,6 +2045,7 @@ export const ProjectView: React.FC = () => {
           onClose={() => setShowRevisionsForPageId(null)}
           onOpenPage={(pid) => { setShowRevisionsForPageId(null); navigate(`/project/${project.id}/page/${pid}`); }}
           onCompare={() => { setComparePageId(showRevisionsForPageId); setShowRevisionsForPageId(null); }}
+          onMoveToSheet={handleMoveToSheet}
         />
       )}
 
@@ -2028,6 +2054,7 @@ export const ProjectView: React.FC = () => {
           project={project}
           pageId={comparePageId}
           onClose={() => setComparePageId(null)}
+          onOpenPage={(pid) => { setComparePageId(null); navigate(`/project/${project.id}/page/${pid}`); }}
         />
       )}
 

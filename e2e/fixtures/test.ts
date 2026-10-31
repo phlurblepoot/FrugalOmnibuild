@@ -8,6 +8,7 @@ import {
   seedProjectWithTakeoffMeasurement,
   seedProjectWithAreaTakeoffLength,
   seedProjectWithSupersededRevision,
+  seedProjectWithCompareRevisions,
   seedCustomerWithPortfolio,
   seedDocumentsPortfolio,
   type LoginResult,
@@ -61,6 +62,7 @@ export {
   seedProjectWithTakeoffMeasurement,
   seedProjectWithAreaTakeoffLength,
   seedProjectWithSupersededRevision,
+  seedProjectWithCompareRevisions,
   seedCustomerWithPortfolio,
   seedDocumentsPortfolio,
 };

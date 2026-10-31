@@ -2,8 +2,9 @@ import type { MailCrypto } from '../mail/crypto';
 import { createClaudeCredentialStore, type ClaudeCredentialStore } from './claudeCredentials';
 import { createClaudeRunner, type ClaudeRunner } from './claudeRunner';
 import { createFakeClaudeQuery } from './fakeClaude';
+import { createUsageStore, type UsageStore } from './usageStore';
 
-export interface AiSetup { store: ClaudeCredentialStore; runner: ClaudeRunner; }
+export interface AiSetup { store: ClaudeCredentialStore; runner: ClaudeRunner; usage: UsageStore; }
 
 let singleton: AiSetup | null = null;
 
@@ -18,13 +19,15 @@ export function getAiSetup(opts: { dataDir: string; crypto: Pick<MailCrypto, 'se
   const store = createClaudeCredentialStore({ dataDir: opts.dataDir, crypto: opts.crypto, env });
   const fake = env.AI_FAKE_CLAUDE === '1';
   if (fake) console.warn('[ai] AI_FAKE_CLAUDE=1: Claude is faked (tests only)');
+  const usage = createUsageStore(opts.dataDir);
   const runner = createClaudeRunner({
     store,
+    usage,
     env,
     queryFn: fake ? createFakeClaudeQuery() : undefined,
     timeoutMs: Number(env.AI_TIMEOUT_MS ?? 120_000),
     clientApp: `frugalomnibuild/${opts.version ?? 'dev'}`,
   });
-  singleton = { store, runner };
+  singleton = { store, runner, usage };
   return singleton;
 }

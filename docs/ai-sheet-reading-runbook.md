@@ -113,6 +113,24 @@ Settings always wins over both.
 default; **Sonnet 5.5** is cheaper; **Haiku 5.5** is fastest and cheapest. The
 change applies to the next page read.
 
+## Usage
+
+The **Usage** part of the same card (admins only) shows:
+
+- **Your plan's limits**, with a subscription: how much of the 5-hour limit and
+  of the weekly limit is used, and when each resets. Anthropic reports these
+  with every call, so they are as of the last page scan or Test connection
+  (Refresh re-reads what was last reported; it does not call Claude). They
+  cover your whole Claude account: claude.ai, Claude Code and this app.
+  Anthropic does not say how much each app used, so under each limit the card
+  shows what this app's page scans used in that same window: pages and tokens.
+- **Page scans** today, in the last 7 days, this month and all time: pages,
+  tokens, and their value at API prices. With an API key that is roughly what
+  you are billed; with a subscription it is only a yardstick, as the plan is
+  not billed per page.
+
+The totals are kept in `claude-usage.json` in the data folder.
+
 ## Where the secret is kept
 
 The pasted token or key is encrypted with the same key as mail passwords

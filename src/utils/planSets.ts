@@ -162,3 +162,71 @@ export const summarizePlanSet = (project: Project | null, setId: string): { newC
   }
   return { newCount, revisedCount, total: seen.size };
 };
+
+export interface MoveToSheetOptions {
+  /** Replace the page's takeoffs with a copy of the target sheet's current
+   *  revision's (only applied when the page becomes the target's newest). */
+  replaceTakeoffs?: boolean;
+}
+
+/**
+ * Fixes a wrong sheet match: makes `pageId` a revision of the sheet `target`
+ * (an effectiveSheetId), or, with `target` null, its own separate sheet.
+ * A legacy target sheet (grouped by page number, no stored sheetId) gets a
+ * real sheetId stamped on all its pages first so the grouping is durable.
+ * Takeoffs stay with the page unless `replaceTakeoffs` asks for a copy of the
+ * target's current revision (what uploading it as a revision would have done).
+ */
+export function moveToSheet(
+  project: Project,
+  pageId: string,
+  target: string | null,
+  newId: () => string,
+  opts: MoveToSheetOptions = {},
+): Project {
+  const page = project.pages.find(p => p.id === pageId);
+  if (!page) return project;
+  if (target === null) {
+    return { ...project, pages: project.pages.map(p => (p.id === pageId ? { ...p, sheetId: newId() } : p)) };
+  }
+  if (target === effectiveSheetId(page)) return project;
+
+  const others = project.pages.filter(p => p.id !== pageId);
+  const model = computeRevisionModel({ ...project, pages: others }, '');
+  const targetPages = model.revisionsBySheet.get(target) || [];
+  if (!targetPages.length) return project;
+  const realId = targetPages.find(p => p.sheetId)?.sheetId || (target.startsWith('pn:') || target.startsWith('id:') ? newId() : target);
+  const targetIds = new Set(targetPages.map(p => p.id));
+
+  // The target's current revision, before this page joins it.
+  const source = targetPages[targetPages.length - 1];
+  const order = planSetIndex(project);
+  const rank = (p: ProjectPage) => (p.planSetId ? order.get(p.planSetId) ?? -1 : -1);
+  const becomesNewest = rank(page) >= rank(source);
+  const copy = opts.replaceTakeoffs && becomesNewest ? carryForwardFrom(source, newId) : null;
+
+  return {
+    ...project,
+    pages: project.pages.map(p => {
+      if (p.id === pageId) {
+        return copy
+          ? { ...p, sheetId: realId, measurements: copy.measurements, scaleConfig: copy.scaleConfig, scaleRegions: copy.scaleRegions, isMultiRegion: copy.isMultiRegion }
+          : { ...p, sheetId: realId };
+      }
+      if (targetIds.has(p.id) && p.sheetId !== realId) return { ...p, sheetId: realId };
+      return p;
+    }),
+  };
+}
+
+/** Whether `pageId` would be the newest revision of sheet `target` if moved there. */
+export function wouldBeNewestIn(project: Project, pageId: string, target: string): boolean {
+  const page = project.pages.find(p => p.id === pageId);
+  if (!page) return false;
+  const model = computeRevisionModel({ ...project, pages: project.pages.filter(p => p.id !== pageId) }, '');
+  const pages = model.revisionsBySheet.get(target) || [];
+  if (!pages.length) return true;
+  const order = planSetIndex(project);
+  const rank = (p: ProjectPage) => (p.planSetId ? order.get(p.planSetId) ?? -1 : -1);
+  return rank(page) >= rank(pages[pages.length - 1]);
+}

@@ -1048,3 +1048,111 @@ export async function seedDocumentsPortfolio(
     printoutPageCount,
   };
 }
+
+export interface SeedCompareRevisionsResult {
+  projectId: string;
+  oldPageId: string;
+  newPageId: string;
+  /** A standalone sheet (its own sheetId) for the "wrong sheet" fix. */
+  otherPageId: string;
+  /** How far Rev 2's drawing moved, in sheet units (2 × PDF points). */
+  shift: { x: number; y: number };
+}
+
+/**
+ * Two vector revisions of one sheet (17×11 in), for revision compare. Rev 2
+ * is the same plan reprinted 15 pt right and 10 pt lower, with one wall gone
+ * and a new one added. Rev 2 carries two takeoffs: "New wall run" over the
+ * added wall and "Outer wall run" along an unchanged wall.
+ */
+export async function seedProjectWithCompareRevisions(
+  request: APIRequestContext,
+  token: string,
+): Promise<SeedCompareRevisionsResult> {
+  const auth = { Authorization: `Bearer ${token}` };
+  const projectId = randomUUID();
+  const sheetId = randomUUID();
+  const oldSetId = randomUUID();
+  const newSetId = randomUUID();
+  const ids = { old: randomUUID(), new: randomUUID(), other: randomUUID() };
+  const W = 1224, H = 792;
+  const SHIFT = { x: 15, y: 10 }; // PDF points; y is downward on the sheet
+
+  const drawPlan = async (rev: 1 | 2) => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([W, H]);
+    const ox = rev === 2 ? SHIFT.x : 0;
+    const oy = rev === 2 ? -SHIFT.y : 0; // pdf-lib's y points up
+    const line = (x1: number, y1: number, x2: number, y2: number) =>
+      page.drawLine({ start: { x: x1 + ox, y: y1 + oy }, end: { x: x2 + ox, y: y2 + oy }, thickness: 3, color: rgb(0, 0, 0) });
+    // Sheet border and title block.
+    page.drawRectangle({ x: 36 + ox, y: 36 + oy, width: W - 72, height: H - 72, borderWidth: 3, borderColor: rgb(0, 0, 0) });
+    line(950, 36, 950, 756);
+    page.drawText('FLOOR PLAN', { x: 970 + ox, y: 100 + oy, size: 28, font });
+    page.drawText(`A-201  REV ${rev}`, { x: 970 + ox, y: 60 + oy, size: 20, font });
+    // Rooms.
+    line(100, 600, 800, 600);
+    line(100, 200, 800, 200);
+    line(100, 200, 100, 600);
+    line(800, 200, 800, 600);
+    line(450, 200, 450, 600);
+    if (rev === 1) line(100, 400, 450, 400); // removed in Rev 2
+    else line(450, 400, 800, 400);           // added in Rev 2
+    for (let i = 0; i < 6; i++) page.drawText(`ROOM ${101 + i}`, { x: 140 + (i % 3) * 230 + ox, y: 520 - Math.floor(i / 3) * 220 + oy, size: 14, font });
+    doc.addPage([W, H]);
+    return doc.save();
+  };
+
+  const upload = async (rev: 1 | 2) => {
+    const fileId = randomUUID();
+    const res = await request.post(
+      `/api/files/${fileId}?projectId=${projectId}&kind=plan-source&sourceType=plan-set&sourceId=${projectId}&name=${encodeURIComponent(`a201-rev${rev}.pdf`)}`,
+      { headers: { ...auth, 'Content-Type': 'application/pdf' }, data: Buffer.from(await drawPlan(rev)) },
+    );
+    if (!res.ok()) throw new Error(`pdf upload failed: ${res.status()} ${await res.text()}`);
+    return fileId;
+  };
+  const oldPdf = await upload(1);
+  const newPdf = await upload(2);
+
+  const thumbnailId = randomUUID();
+  const thumbRes = await request.post('/api/images', {
+    headers: auth,
+    data: { id: thumbnailId, data: `data:image/png;base64,${readFileSync(TEST_PAGE_PNG).toString('base64')}` },
+  });
+  if (!thumbRes.ok()) throw new Error(`thumbnail upload failed: ${thumbRes.status()}`);
+
+  // Sheet units: 2× points, origin top-left.
+  const u = (xPt: number, yPt: number) => ({ x: (xPt) * 2, y: (H - yPt) * 2 });
+  const vectorPage = (id: string, name: string, pdf: string, planSetId: string, sid: string, measurements: unknown[]) => ({
+    id, name, pageNumber: name.split(' ')[0], description: 'Floor plan', imageId: '', thumbnailId,
+    imageWidth: W * 2, imageHeight: H * 2, sourcePdfFileId: pdf, sourcePdfPageNum: 1,
+    sheetId: sid, planSetId, measurements, scaleConfig: { pixelDistance: 100, realWorldDistance: 10, unit: 'ft' },
+  });
+  // Rev 2's takeoffs, in Rev 2's own sheet units (so including its shift).
+  const r2 = (xPt: number, yPt: number) => u(xPt + SHIFT.x, yPt - SHIFT.y);
+  const project = {
+    id: projectId,
+    name: `E2E Compare ${projectId.slice(0, 8)}`,
+    createdAt: Date.now(),
+    takeoffs: [],
+    planSets: [
+      { id: oldSetId, name: 'Bid set', date: '2026-01-01', createdAt: Date.now() - 10_000 },
+      { id: newSetId, name: 'Addendum 1', date: '2026-02-01', createdAt: Date.now() },
+    ],
+    pages: [
+      vectorPage(ids.old, 'A-201 Floor plan', oldPdf, oldSetId, sheetId, []),
+      vectorPage(ids.new, 'A-201 Floor plan', newPdf, newSetId, sheetId, [
+        { id: randomUUID(), type: 'length', name: 'New wall run', color: '#16a34a', points: [r2(470, 400), r2(780, 400)] },
+        { id: randomUUID(), type: 'length', name: 'Outer wall run', color: '#16a34a', points: [r2(120, 600), r2(780, 600)] },
+      ]),
+      vectorPage(ids.other, 'A-301 Sections', oldPdf, oldSetId, randomUUID(), []),
+    ],
+    version: 1,
+    status: 'bidding',
+  };
+  const projRes = await request.post('/api/projects', { headers: auth, data: project });
+  if (!projRes.ok()) throw new Error(`project create failed: ${projRes.status()} ${await projRes.text()}`);
+  return { projectId, oldPageId: ids.old, newPageId: ids.new, otherPageId: ids.other, shift: { x: SHIFT.x * 2, y: SHIFT.y * 2 } };
+}

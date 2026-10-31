@@ -13,6 +13,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AiRunner, AiState, AiErrorCode, AiLastError, SheetRead, SheetMatch, ExistingSheetRef, TranscribeMode, TranscribeResult } from './types';
 import type { ClaudeCredentialStore } from './claudeCredentials';
+import { planLimitsFrom, usageFromModelUsage, type UsageKind, type UsageStore } from './usageStore';
 import { createSingleFlightQueue } from './queue';
 import { SYSTEM_PROMPT, buildReadPrompt, parseReadResponse, buildMatchPrompt, parseMatchResponse, buildTranscribePrompt, parseTranscribeResponse } from './prompt';
 
@@ -79,6 +80,8 @@ export interface ClaudeRunnerConfig {
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
   clientApp?: string;
+  /** Where each call's token use and the plan's reported limits are kept. */
+  usage?: UsageStore;
 }
 
 export interface ClaudeRunner extends AiRunner {
@@ -109,12 +112,13 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
     };
   }
 
-  async function ask(content: UserContent): Promise<string> {
+  async function ask(content: UserContent, kind: UsageKind): Promise<string> {
     const cred = cfg.store.resolve();
     if (!cred) throw new ClaudeAiError('auth', 'Claude is not connected. An admin can connect it in Settings.');
     const workDir = path.join(cfg.store.configDir, 'work');
     fs.mkdirSync(workDir, { recursive: true });
 
+    const model = cfg.store.getModel();
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), timeoutMs);
     async function* prompt(): AsyncGenerator<SDKUserMessage> {
@@ -129,7 +133,7 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
       for await (const m of queryFn({
         prompt: prompt(),
         options: {
-          model: cfg.store.getModel(),
+          model,
           systemPrompt: SYSTEM_PROMPT,
           tools: [],
           settingSources: [],
@@ -144,7 +148,14 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
         if (m.type === 'assistant' && m.error) apiError = m.error;
         // The CLI retries 429s and 5xx on its own; remember why, in case we time out first.
         if (m.type === 'system' && m.subtype === 'api_retry') retryError = m.error;
+        // Anthropic's report on the plan's limits (subscriptions only).
+        if (m.type === 'rate_limit_event') {
+          const plan = planLimitsFrom(m.rate_limit_info);
+          if (plan) cfg.usage?.recordPlan(plan);
+        }
         if (m.type === 'result') {
+          // Tokens are spent whether or not the answer is usable.
+          cfg.usage?.record(usageFromModelUsage(kind, model, m.modelUsage));
           if (m.subtype === 'success' && !m.is_error) answer = m.result;
           else failure = m.subtype === 'success' ? m.result : (m.errors ?? []).join('; ') || m.subtype;
         }
@@ -167,9 +178,9 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
     throw new ClaudeAiError(code, MESSAGES[code]);
   }
 
-  async function run<T>(label: string, content: UserContent, parse: (raw: string) => T): Promise<T> {
+  async function run<T>(label: string, kind: UsageKind, content: UserContent, parse: (raw: string) => T): Promise<T> {
     try {
-      const raw = await queue.enqueue(() => ask(content));
+      const raw = await queue.enqueue(() => ask(content, kind));
       console.log(`[ai] ${label} raw:`, raw.slice(0, 400));
       lastError = null;
       return parse(raw);
@@ -196,20 +207,20 @@ export function createClaudeRunner(cfg: ClaudeRunnerConfig): ClaudeRunner {
         details.forEach((d, i) => content.push(text(`${QUARTERS[i] ?? `Part ${i + 1}`}:`), image(d)));
       }
       content.push(text(prompt || buildReadPrompt(embeddedText, layoutText, setContext)));
-      return run('read-sheet', content, parseReadResponse);
+      return run('read-sheet', 'read', content, parseReadResponse);
     },
 
     matchSheet({ page, existing }: { page: SheetRead; existing: ExistingSheetRef[] }): Promise<SheetMatch> {
-      return run('match-sheet', [text(buildMatchPrompt(page, existing))], raw => parseMatchResponse(raw, existing.map(e => e.sheetId)));
+      return run('match-sheet', 'match', [text(buildMatchPrompt(page, existing))], raw => parseMatchResponse(raw, existing.map(e => e.sheetId)));
     },
 
     transcribeRegion({ image: crop, mode }: { image: Buffer; mode: TranscribeMode }): Promise<TranscribeResult> {
-      return run('transcribe', [image(crop), text(buildTranscribePrompt(mode))], parseTranscribeResponse);
+      return run('transcribe', 'transcribe', [image(crop), text(buildTranscribePrompt(mode))], parseTranscribeResponse);
     },
 
     async testConnection() {
       try {
-        await run('test', [text('Connection check. Respond with ONLY this JSON: {"ok": true}')], raw => raw);
+        await run('test', 'test', [text('Connection check. Respond with ONLY this JSON: {"ok": true}')], raw => raw);
         return { ok: true, model: cfg.store.getModel() };
       } catch (e: any) {
         return { ok: false, code: (e as ClaudeAiError).code ?? 'other', error: String(e?.message ?? e) };

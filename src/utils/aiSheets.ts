@@ -207,7 +207,30 @@ async function claudeAdmin<T>(method: string, path: string, body?: unknown): Pro
   return data as T;
 }
 
+export interface UsageTotals {
+  pages: number;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Value at API list prices (what an API key pays). */
+  costUsd: number;
+}
+export interface LimitWindow { utilization: number | null; resetsAt: number | null; status?: string; }
+export interface ClaudeUsage {
+  today: UsageTotals;
+  last7Days: UsageTotals;
+  thisMonth: UsageTotals;
+  allTime: UsageTotals;
+  /** The Claude plan's limits for the whole account, as Anthropic last reported them. */
+  plan: { at: number; status?: string; fiveHour?: LimitWindow; sevenDay?: LimitWindow } | null;
+  inFiveHourWindow: UsageTotals | null;
+  inSevenDayWindow: UsageTotals | null;
+}
+
 export const claudeApi = {
+  usage: () => claudeAdmin<ClaudeUsage>('GET', '/usage'),
   get: () => claudeAdmin<ClaudeConnection>('GET', ''),
   connect: (kind: 'token' | 'apiKey', secret: string) => claudeAdmin<ClaudeConnection>('PUT', '/credential', { kind, secret }),
   disconnect: () => claudeAdmin<ClaudeConnection>('DELETE', '/credential'),

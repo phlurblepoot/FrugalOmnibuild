@@ -199,6 +199,35 @@ describe('createClaudeRunner', () => {
   });
 });
 
+describe('usage', () => {
+  it('records each call\'s token use and the plan limits Anthropic reports', async () => {
+    const usage = { record: vi.fn(), recordPlan: vi.fn(), summary: vi.fn() };
+    const r = createClaudeRunner({
+      store: store(),
+      usage,
+      queryFn: fakeQuery(() => [
+        { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: { five_hour: { utilization: 0.34, resetsAt: 100 } } } } as unknown as SDKMessage,
+        { type: 'result', subtype: 'success', is_error: false, result: READ, modelUsage: { 'claude-sonnet-5-5': { inputTokens: 15000, outputTokens: 400, costUSD: 0.034 } } } as unknown as SDKMessage,
+      ]),
+    });
+    await r.readSheet({ image: JPEG });
+    await r.testConnection();
+    expect(usage.record).toHaveBeenNthCalledWith(1, expect.objectContaining({ kind: 'read', model: 'claude-sonnet-5-5', inputTokens: 15000, outputTokens: 400, costUsd: 0.034 }));
+    expect(usage.record).toHaveBeenNthCalledWith(2, expect.objectContaining({ kind: 'test' }));
+    expect(usage.recordPlan).toHaveBeenCalledWith(expect.objectContaining({ fiveHour: { utilization: 0.34, resetsAt: 100_000 } }));
+  });
+
+  it('records the tokens of a call whose answer was an error', async () => {
+    const usage = { record: vi.fn(), recordPlan: vi.fn(), summary: vi.fn() };
+    const r = createClaudeRunner({
+      store: store(), usage,
+      queryFn: fakeQuery(() => [{ type: 'result', subtype: 'error_max_turns', is_error: true, errors: ['x'], modelUsage: { m: { inputTokens: 9, outputTokens: 1, costUSD: 0.001 } } } as unknown as SDKMessage]),
+    });
+    await expect(r.readSheet({ image: JPEG })).rejects.toBeTruthy();
+    expect(usage.record).toHaveBeenCalledWith(expect.objectContaining({ inputTokens: 9 }));
+  });
+});
+
 describe('classifyClaudeError', () => {
   it('maps SDK error codes', () => {
     expect(classifyClaudeError('authentication_failed', '')).toBe('auth');
