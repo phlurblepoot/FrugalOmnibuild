@@ -213,7 +213,7 @@ describe('CommandPalette help overlay', () => {
     expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
     expect(screen.getByText('On the canvas')).toBeInTheDocument();
     expect(screen.getByText('Undo')).toBeInTheDocument();
-    expect(screen.getByText('Paste measurement')).toBeInTheDocument();
+    expect(screen.getByText('Paste segments')).toBeInTheDocument();
     // Existing global shortcuts remain.
     expect(screen.getByText('Open command palette / search')).toBeInTheDocument();
   });

@@ -20,6 +20,7 @@ import {
   labelAngle,
   placeSegmentLabel,
   summarizeSelection,
+  summarizeSegmentSet,
 } from './segmentValue';
 import { allocateSubsetCost } from './costAllocation';
 import { calculatePolylineLength, expandArcPoints, formatMeasurement, measurementAreaPx } from './math';
@@ -495,5 +496,40 @@ describe('labelAngle', () => {
     expect(labelAngle('count', [{ x: 1, y: 1 }])).toBe(0);
     expect(labelAngle('length', [{ x: 1, y: 1 }])).toBe(0);
     expect(labelAngle('length', [{ x: 1, y: 1 }, { x: 1, y: 1 }])).toBe(0);
+  });
+});
+
+describe('summarizeSegmentSet', () => {
+  // 100 px = 10 ft on the page; region r2 is 100 px = 20 ft.
+  const page = {
+    scaleConfig: { pixelDistance: 100, realWorldDistance: 10, unit: 'ft' },
+    isMultiRegion: true,
+    scaleRegions: [{ id: 'r2', name: 'Detail', points: [], scaleConfig: { pixelDistance: 100, realWorldDistance: 20, unit: 'ft' } }],
+    measurements: [
+      { id: 'a', type: 'length', name: 'A', color: '#000', takeoffId: 't1', points: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+        segments: [{ points: [{ x: 0, y: 10 }, { x: 50, y: 10 }] }] },
+      { id: 'b', type: 'length', name: 'B', color: '#000', takeoffId: 't2', regionId: 'r2', points: [{ x: 0, y: 0 }, { x: 15, y: 0 }] },
+      { id: 'c', type: 'area', name: 'C', color: '#000', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }] },
+      { id: 'n', type: 'count', name: 'N', color: '#000', points: [{ x: 1, y: 1 }] },
+    ],
+  } as unknown as Parameters<typeof summarizeSegmentSet>[0];
+
+  it('adds lengths across measurements and scale regions, in feet and inches', () => {
+    // 10 ft + 5 ft + 15 px at 20 ft/100 px = 3 ft → 18 ft
+    const s = summarizeSegmentSet(page, [
+      { measurementId: 'a', segIdx: -1 }, { measurementId: 'a', segIdx: 0 }, { measurementId: 'b', segIdx: -1 },
+    ])!;
+    expect(s.count).toBe(3);
+    expect(s.type).toBe('length');
+    expect(s.total).toBe(`18' - 0"`);
+  });
+
+  it('words areas in square feet and markers as each', () => {
+    expect(summarizeSegmentSet(page, [{ measurementId: 'c', segIdx: -1 }])!.total).toBe('1.00 sq ft');
+    expect(summarizeSegmentSet(page, [{ measurementId: 'n', segIdx: -1 }])!.total).toBe('1 each');
+  });
+
+  it('is null when nothing resolves', () => {
+    expect(summarizeSegmentSet(page, [{ measurementId: 'gone', segIdx: -1 }])).toBeNull();
   });
 });

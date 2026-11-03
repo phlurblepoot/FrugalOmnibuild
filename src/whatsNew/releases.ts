@@ -41,6 +41,36 @@ export interface WhatsNewRelease {
 
 export const RELEASES: WhatsNewRelease[] = [
   {
+    version: '4.8.1.4',
+    intro: {
+      title: 'Copy and paste segments on the takeoff canvas',
+      body: 'Copy and paste now work with the segments you select, not whole measurements, and you can select several segments at once. Two pages: selecting, then pasting.',
+    },
+    pages: [
+      {
+        id: 'select-segments', kind: 'new', area: 'Takeoff canvas', title: 'Select several segments with Shift',
+        body: 'Hold [[Shift]] and click segments to select them together, even from different measurements and takeoffs. Shift+click a selected segment again to drop it.',
+        points: [
+          'The bar under the plan shows how many are selected and their combined length in feet and inches (or area in square feet).',
+          'Lengths, areas and count markers can’t be mixed in one selection.',
+          '[[Ctrl]]+click still selects whole measurements, for Merge or to copy them.',
+        ],
+        shots: [{ file: 'select-segments.webp', dark: true, caption: 'Two Casing Bead lines selected with Shift+click: 2 segments, 35\' - 4 19/32" together.' }],
+      },
+      {
+        id: 'paste-segments', kind: 'improved', area: 'Takeoff canvas', title: 'Copy segments, then choose where they go',
+        body: 'Press [[Ctrl]]+[[C]] (or right-click and choose Copy) to copy the selected segments. [[Ctrl]]+[[V]] asks where to put them.',
+        points: [
+          'Current takeoff adds them as a new measurement in the takeoff that’s active in the sidebar.',
+          'New takeoff opens the New Takeoff form, then puts them in the new takeoff as its measurement.',
+          'Pasted on the same page they shift a little so they don’t sit on top; on another sheet they land in the same spot. [[Ctrl]]+[[Z]] undoes a paste.',
+          'Copy works on older, read-only revisions too, so you can bring takeoff lines forward to a new revision.',
+        ],
+        shots: [{ file: 'paste.webp', dark: true, caption: 'Pasting two copied segments: into the current takeoff, or a new one.' }],
+      },
+    ],
+  },
+  {
     version: '4.8',
     intro: {
       title: 'Welcome to FrugalOmnibuild 4.8',

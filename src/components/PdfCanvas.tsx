@@ -197,6 +197,10 @@ interface PdfCanvasProps {
   selectedSegmentIdx?: number | null;
   onSelectMeasurement: (id: string | null) => void;
   onSelectSegment?: (id: string, segIdx: number) => void;
+  /** Shift+click: add/remove one segment (-1 = primary) in the segment selection. */
+  onSegmentToggle?: (id: string, segIdx: number) => void;
+  /** Shift-selected segments, keyed `${measurementId}:${segIdx}`. */
+  segmentSelection?: Set<string>;
   /** Quick-measure mode: every line or area drawn is a measurement of its own
    *  (never a segment appended to the selected one). Cutouts still attach. */
   quickMeasure?: boolean;
@@ -250,7 +254,8 @@ interface PdfCanvasProps {
   onPageReferenceClick?: (pageId: string) => void;
   onUndo?: () => void;
   onRedo?: () => void;
-  onCopy?: () => void;
+  /** Copies the given measurement's selected segment(s) (or all of it, when it isn't the selected one). */
+  onCopy?: (measurementId?: string) => void;
   onPaste?: () => void;
   hasCopied?: boolean;
   multiSelectedIds?: Set<string>;
@@ -291,6 +296,8 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
   selectedSegmentIdx = null,
   onSelectMeasurement,
   onSelectSegment,
+  onSegmentToggle,
+  segmentSelection,
   quickMeasure = false,
   onCancel,
   isMultiRegion = false,
@@ -1051,7 +1058,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
       // click of a segment, where activePoints is still empty.)
       const isDrawingTool = currentTool === 'length' || isAreaLikeTool;
       if (activePoints.length === 0 && !isDrawingTool) {
-        if (!e.evt.ctrlKey && !e.evt.metaKey && !isMultiSelectMode) {
+        if (!e.evt.ctrlKey && !e.evt.metaKey && !e.evt.shiftKey && !isMultiSelectMode) {
           onSelectMeasurement(null);
           onClearMultiSelect?.();
         }
@@ -1660,6 +1667,10 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
       const isPrimarySelected = isSelected && (selectedSegmentIdx === null || selectedSegmentIdx === -1);
       const isSegmentSelected = (segIdx: number) => isSelected && (selectedSegmentIdx === null || selectedSegmentIdx === segIdx);
       const isMultiSelected = multiSelectedIds?.has(m.id) ?? false;
+      // Shift-selected segments glow like a selected segment.
+      const inSegSel = (segIdx: number) => segmentSelection?.has(`${m.id}:${segIdx}`) ?? false;
+      const primaryGlow = isPrimarySelected || inSegSel(-1);
+      const segGlow = (segIdx: number) => isSegmentSelected(segIdx) || inSegSel(segIdx);
       const isDrawingTool = currentTool === 'length' || isAreaLikeTool || currentTool === 'count';
 
       // While ONE segment of a multi-segment measurement is selected, that
@@ -1732,6 +1743,10 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
       const handleSegmentClick = (e: any, segIdx: number) => {
         e.cancelBubble = true;
         if (activePoints.length > 0) return;
+        if (e.evt?.shiftKey && onSegmentToggle) {
+          onSegmentToggle(m.id, segIdx);
+          return;
+        }
         if (e.evt?.ctrlKey || e.evt?.metaKey || isMultiSelectMode) {
           onMultiSelectToggle?.(m.id, m.type);
           return;
@@ -1798,7 +1813,9 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
           onClick={(e) => {
             e.cancelBubble = true;
             if (activePoints.length === 0) {
-              if (e.evt.ctrlKey || e.evt.metaKey || isMultiSelectMode) {
+              if (e.evt.shiftKey && onSegmentToggle) {
+                onSegmentToggle(m.id, -1);
+              } else if (e.evt.ctrlKey || e.evt.metaKey || isMultiSelectMode) {
                 onMultiSelectToggle?.(m.id, m.type);
               } else {
                 onClearMultiSelect?.();
@@ -1821,8 +1838,8 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
           onContextMenu={(e) => {
             e.evt.preventDefault();
             e.cancelBubble = true;
-            // Read-only history: no edit/delete menu on measurements.
-            if (readOnly) return;
+            // Read-only history: the menu offers Copy only (no edit/delete).
+            if (readOnly && !onCopy) return;
             setContextMenu({ x: e.evt.clientX, y: e.evt.clientY, measurementId: m.id });
           }}
           onTouchStart={(e) => {
@@ -1881,7 +1898,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                 onUpdateMeasurement(m.id, { points: [{ x: e.target.x(), y: e.target.y() }] });
               }}
             >
-              {isSelected && (
+              {(isSelected || inSegSel(-1)) && (
                 <Circle
                   radius={20 / stageScale}
                   stroke="#fbbf24"
@@ -1933,7 +1950,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                 onUpdateMeasurement(m.id, { points: newPoints });
               }}
             >
-              {isPrimarySelected && (
+              {primaryGlow && (
                 <Line
                   points={flatPoints}
                   stroke="#fbbf24"
@@ -1949,16 +1966,16 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
               <Line
                 points={flatPoints}
                 stroke={isMultiSelected ? '#f59e0b' : m.color}
-                strokeWidth={isPrimarySelected ? 8 / stageScale : isMultiSelected ? 7 / stageScale : 5 / stageScale}
+                strokeWidth={primaryGlow ? 8 / stageScale : isMultiSelected ? 7 / stageScale : 5 / stageScale}
                 hitStrokeWidth={20 / stageScale}
                 lineJoin="round"
                 lineCap="round"
                 closed={m.type === 'area'}
                 fill={m.type === 'area' && !hasHoles ? `${isMultiSelected ? '#f59e0b' : m.color}${isPrimarySelected ? '60' : isMultiSelected ? '50' : '40'}` : undefined}
                 dash={m.takeoffId ? undefined : quickDash}
-                shadowColor={isMultiSelected ? '#f59e0b' : isPrimarySelected ? '#fbbf24' : undefined}
-                shadowBlur={isMultiSelected ? 14 / stageScale : isPrimarySelected ? 18 / stageScale : 0}
-                shadowOpacity={isMultiSelected ? 0.7 : isPrimarySelected ? 0.85 : 0}
+                shadowColor={isMultiSelected ? '#f59e0b' : primaryGlow ? '#fbbf24' : undefined}
+                shadowBlur={isMultiSelected ? 14 / stageScale : primaryGlow ? 18 / stageScale : 0}
+                shadowOpacity={isMultiSelected ? 0.7 : primaryGlow ? 0.85 : 0}
                 onDblClick={(e) => {
                   e.cancelBubble = true;
                   const newPoints = insertVertexAtClick(m.points);
@@ -2070,7 +2087,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                   onUpdateMeasurement(m.id, { segments: newSegments });
                 }}
               >
-                {isSegmentSelected(segIdx) && (
+                {segGlow(segIdx) && (
                   <Line
                     points={segFlat}
                     stroke="#fbbf24"
@@ -2086,16 +2103,16 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
                 <Line
                   points={segFlat}
                   stroke={m.color}
-                  strokeWidth={isSegmentSelected(segIdx) ? 8 / stageScale : 5 / stageScale}
+                  strokeWidth={segGlow(segIdx) ? 8 / stageScale : 5 / stageScale}
                   hitStrokeWidth={20 / stageScale}
                   lineJoin="round"
                   lineCap="round"
                   closed={m.type === 'area'}
                   fill={m.type === 'area' && !hasHoles ? `${m.color}${isSegmentSelected(segIdx) ? '60' : '40'}` : undefined}
                   dash={seg.subtract ? [10 / stageScale, 7 / stageScale] : m.takeoffId ? undefined : quickDash}
-                  shadowColor={isSegmentSelected(segIdx) ? '#fbbf24' : undefined}
-                  shadowBlur={isSegmentSelected(segIdx) ? 18 / stageScale : 0}
-                  shadowOpacity={isSegmentSelected(segIdx) ? 0.85 : 0}
+                  shadowColor={segGlow(segIdx) ? '#fbbf24' : undefined}
+                  shadowBlur={segGlow(segIdx) ? 18 / stageScale : 0}
+                  shadowOpacity={segGlow(segIdx) ? 0.85 : 0}
                   onDblClick={(e) => {
                     e.cancelBubble = true;
                     const newPts = insertVertexAtClick(seg.points);
@@ -2486,16 +2503,19 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
         >
           {contextMenu.measurementId && (
             <>
-              <button
-                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
-                onClick={() => { onDeleteMeasurement(contextMenu.measurementId!); setContextMenu(null); }}
-              >
-                <Trash2 size={14} /> Delete
-              </button>
+              {!readOnly && (
+                <button
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+                  onClick={() => { onDeleteMeasurement(contextMenu.measurementId!); setContextMenu(null); }}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
               {onCopy && (
                 <button
+                  data-testid="context-menu-copy"
                   className="w-full text-left px-4 py-2 text-sm text-ink hover:bg-hover flex items-center gap-2"
-                  onClick={() => { onCopy(); setContextMenu(null); }}
+                  onClick={() => { onCopy(contextMenu.measurementId!); setContextMenu(null); }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   Copy
@@ -2524,6 +2544,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
           )}
           {onPaste && (
             <button
+              data-testid="context-menu-paste"
               className="w-full text-left px-4 py-2 text-sm text-ink hover:bg-hover flex items-center gap-2 disabled:opacity-40"
               onClick={() => { onPaste(); setContextMenu(null); }}
               disabled={!hasCopied}
