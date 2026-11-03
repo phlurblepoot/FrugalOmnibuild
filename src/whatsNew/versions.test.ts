@@ -65,3 +65,21 @@ describe('the 4.8 pages', () => {
     }
   });
 });
+
+describe('the 4.8.1.4 pages', () => {
+  const r = RELEASES.find(x => x.version === '4.8.1.4')!;
+
+  it('is selecting several segments, then copying and pasting them', () => {
+    expect(r.pages.map(p => p.id)).toEqual(['select-segments', 'paste-segments']);
+    expect(r.pages.every(p => p.area === 'Takeoff canvas')).toBe(true);
+  });
+
+  it('has every picture it names, in light and dark', () => {
+    for (const p of r.pages) {
+      for (const s of p.shots) {
+        expect(existsSync(join('public', 'whats-new', r.version, s.file)), s.file).toBe(true);
+        if (s.dark) expect(existsSync(join('public', 'whats-new', r.version, s.file.replace('.webp', '-dark.webp'))), s.file).toBe(true);
+      }
+    }
+  });
+});

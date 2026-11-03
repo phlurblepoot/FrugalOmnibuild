@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import type { DemoManifest } from './demo-data';
 import { open, readManifest, settle, signIn } from './shot';
 
-// The pictures in the "What's new" popup for 4.7 and 4.8 (src/whatsNew/releases.ts),
+// The pictures in the "What's new" popup for 4.7, 4.8 and 4.8.1.4 (src/whatsNew/releases.ts),
 // taken in the demo company, light and dark, and saved as WebP in
 // public/whats-new/<version>/. Each sketch is drawn here with the editor's own
 // tools; the drawing sheet and the issue report are rendered from the PDFs
@@ -554,3 +554,61 @@ for (const theme of THEMES) {
     await save(page, 'connect', theme, { x: b.x - pad, y: Math.max(0, b.y - pad), width: b.width + 2 * pad, height: Math.min(b.height + 2 * pad, page.viewportSize()!.height - Math.max(0, b.y - pad)) }, OUT_48);
   });
 }
+
+// ── 4.8.1.4: copy and paste segments ──────────────────────────────────────────
+// Two new Casing Bead lines on the floor plan, Shift-selected together, then
+// copied and pasted: the selection bar, and the "where should it go" choice.
+
+const OUT_4814 = join('public', 'whats-new', '4.8.1.4');
+
+test('4.8.1.4 canvas: Shift+click segments, then paste (light, then dark)', async ({ page }) => {
+  mkdirSync(OUT_4814, { recursive: true });
+  await signIn(page, m, 'light');
+  await open(page, floorPlan());
+  await page.keyboard.press('Escape');
+  await page.getByTestId('measurement-sidebar').getByText('Casing Bead', { exact: true }).click();
+  const box = (await page.getByTestId('canvas-surface').boundingBox())!;
+  const at = async (dx: number, dy: number) => {
+    await page.mouse.move(box.x + dx, box.y + dy);
+    await page.mouse.click(box.x + dx, box.y + dy);
+    await page.waitForTimeout(80);
+  };
+  const a = { x1: box.width * 0.24, x2: box.width * 0.44, y: box.height * 0.42 };
+  const b = { x: box.width * 0.52, y1: box.height * 0.3, y2: box.height * 0.62 };
+  await page.getByTestId('tool-length').click();
+  await at(a.x1, a.y); await at(a.x2, a.y);
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Escape');
+  // Deselecting drops back to the hand tool.
+  await page.getByTestId('tool-length').click();
+  await at(b.x, b.y1); await at(b.x, b.y2);
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('tool-pan').click();
+  await page.keyboard.down('Shift');
+  await at((a.x1 + a.x2) / 2, a.y);
+  await at(b.x, (b.y1 + b.y2) / 2);
+  await page.keyboard.up('Shift');
+  await expect(page.getByTestId('selection-info-segment-set')).toContainText('2 segments selected');
+  await page.mouse.move(0, 0);
+  await settle(page);
+  await save(page, 'select-segments', 'light', appArea(page), OUT_4814);
+  await page.getByRole('button', { name: 'Dark mode' }).click();
+  await settle(page);
+  await save(page, 'select-segments', 'dark', appArea(page), OUT_4814);
+
+  await page.keyboard.press('Control+c');
+  await page.keyboard.press('Control+v');
+  const modal = page.getByTestId('paste-segments-modal');
+  await expect(modal).toContainText('Paste 2 segments');
+  await settle(page);
+  await save(page, 'paste', 'dark', appArea(page), OUT_4814);
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0);
+  await page.getByRole('button', { name: 'Light mode' }).click();
+  await page.keyboard.press('Control+v');
+  await expect(modal).toBeVisible();
+  await settle(page);
+  await save(page, 'paste', 'light', appArea(page), OUT_4814);
+});

@@ -32,6 +32,13 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.1.4',
+    date: 'November 3, 2026',
+    changes: [
+      'New: a short What\'s new tour for selecting several segments with Shift+click and for copying and pasting segments into the current or a new takeoff.',
+    ],
+  },
+  {
     version: '4.8.1.3',
     date: 'November 3, 2026',
     changes: [
