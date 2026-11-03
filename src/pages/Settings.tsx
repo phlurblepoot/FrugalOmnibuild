@@ -32,6 +32,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.1.3',
+    date: 'November 3, 2026',
+    changes: [
+      'New: Shift+click selects several segments on the takeoff canvas, even from different measurements and takeoffs. Shift+click a selected segment again to drop it. The selection bar shows how many are selected and their combined length in feet and inches (or area in square feet).',
+      'Lengths, areas and count markers can\'t be mixed in one selection; Shift+clicking a different type leaves the selection as it is and says why.',
+      'Ctrl+C copies all the Shift-selected segments, or every segment of the measurements picked with Ctrl+click. Pasting puts them together as one new measurement in the current takeoff or a new one.',
+    ],
+  },
+  {
     version: '4.8.1.2',
     date: 'November 3, 2026',
     changes: [

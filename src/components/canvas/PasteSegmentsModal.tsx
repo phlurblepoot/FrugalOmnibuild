@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { MeasurementTakeoff } from '../../types';
 import { CopiedSegments, canPasteInto, segmentCountLabel } from '../../utils/segmentClipboard';
 
@@ -11,6 +11,18 @@ export const PasteSegmentsModal: React.FC<{
   onPasteIntoNew: () => void;
   onCancel: () => void;
 }> = ({ clip, activeTakeoff, onPasteIntoActive, onPasteIntoNew, onCancel }) => {
+  // Escape closes the choice. Captured on window ahead of the canvas's own key
+  // handler, which may not have re-bound to the open dialog yet.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      onCancel();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onCancel]);
+
   const activeFits = !!activeTakeoff && canPasteInto(clip, activeTakeoff);
   const activeHint = !activeTakeoff
     ? 'No takeoff is active. Pick one in the sidebar first.'

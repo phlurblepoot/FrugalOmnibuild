@@ -13,6 +13,10 @@ import {
   segmentCountLabel,
   SEGMENT_CLIPBOARD_KEY,
   PASTE_OFFSET_PX,
+  toggleSegmentRef,
+  segmentRefKey,
+  allSegmentRefs,
+  copySegmentRefs,
 } from './segmentClipboard';
 
 const line: Measurement = {
@@ -166,5 +170,62 @@ describe('clipboard storage', () => {
     expect(segmentCountLabel({ type: 'length', segments: [{ points: [] }] })).toBe('1 segment');
     expect(segmentCountLabel({ type: 'area', segments: [{ points: [] }, { points: [] }] })).toBe('2 segments');
     expect(segmentCountLabel({ type: 'count', segments: [{ points: [] }] })).toBe('marker');
+  });
+});
+
+describe('several segments (Shift+click)', () => {
+  const area: Measurement = {
+    id: 'a', type: 'area', name: 'Area 1', color: '#000',
+    points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }],
+  };
+  const other: Measurement = {
+    id: 'm2', type: 'length', name: 'Length 2', color: '#00f', takeoffId: 't-other',
+    points: [{ x: 500, y: 500 }, { x: 600, y: 500 }],
+  };
+  const typeOf = (id: string) => [line, area, other].find(m => m.id === id)?.type;
+
+  it('toggles segments on and off', () => {
+    let { refs } = toggleSegmentRef([], { measurementId: 'm1', segIdx: 0 }, typeOf);
+    ({ refs } = toggleSegmentRef(refs, { measurementId: 'm2', segIdx: -1 }, typeOf));
+    expect(refs.map(segmentRefKey)).toEqual(['m1:0', 'm2:-1']);
+    ({ refs } = toggleSegmentRef(refs, { measurementId: 'm1', segIdx: 0 }, typeOf));
+    expect(refs.map(segmentRefKey)).toEqual(['m2:-1']);
+  });
+
+  it('refuses to mix measurement types', () => {
+    const start = [{ measurementId: 'm1', segIdx: -1 }];
+    const res = toggleSegmentRef(start, { measurementId: 'a', segIdx: -1 }, typeOf);
+    expect(res.rejected).toBe(true);
+    expect(res.refs).toBe(start);
+  });
+
+  it('lists every segment of a measurement', () => {
+    expect(allSegmentRefs(line).map(segmentRefKey)).toEqual(['m1:-1', 'm1:0', 'm1:1']);
+    expect(allSegmentRefs(other).map(segmentRefKey)).toEqual(['m2:-1']);
+  });
+
+  it('copies segments from different measurements and takeoffs into one clip', () => {
+    const clip = copySegmentRefs(
+      [{ measurementId: 'm1', segIdx: 1 }, { measurementId: 'm2', segIdx: -1 }],
+      [line, other], 'p1',
+    )!;
+    expect(clip.type).toBe('length');
+    expect(clip.segments.map(s => s.points[0])).toEqual([{ x: 0, y: 90 }, { x: 500, y: 500 }]);
+    // Heights belong to one measurement: dropped when sources differ.
+    expect(clip.heights).toBeUndefined();
+    const m = buildPastedMeasurement(clip, { id: 'n', name: 'x', takeoff: lengthTakeoff, pageId: 'p1' });
+    expect(m.segments).toHaveLength(1);
+    expect(m.takeoffId).toBe('t-len');
+  });
+
+  it('keeps heights when every segment is from one measurement', () => {
+    const clip = copySegmentRefs([{ measurementId: 'm1', segIdx: -1 }, { measurementId: 'm1', segIdx: 1 }], [line], 'p1')!;
+    expect(clip.segments).toHaveLength(2);
+    expect(clip.heights).toEqual([8]);
+  });
+
+  it('refuses a mixed-type set and skips missing measurements', () => {
+    expect(copySegmentRefs([{ measurementId: 'm1', segIdx: -1 }, { measurementId: 'a', segIdx: -1 }], [line, area], 'p1')).toBeNull();
+    expect(copySegmentRefs([{ measurementId: 'gone', segIdx: -1 }], [line], 'p1')).toBeNull();
   });
 });

@@ -125,4 +125,100 @@ test.describe('CanvasView segment copy / paste', () => {
     await page.getByTestId('context-menu-copy').click();
     await expect(page.getByText(/Copied \d segments?/).last()).toBeVisible();
   });
+  test('Shift+click selects segments across measurements and takeoffs (one type only); Ctrl+click copies whole measurements', async ({ authedPage: page, request }) => {
+    test.setTimeout(60_000);
+    const { token } = await login(request);
+    const { projectId, pageId } = await seedProjectWithPage(request, token, { withScale: false });
+    await page.goto(`/project/${projectId}/page/${pageId}`);
+    await expect(page.locator('[data-testid="canvas-surface"] canvas').first()).toBeVisible();
+    await page.waitForTimeout(400);
+    const box = await surfaceBox(page);
+    const cy = box.height / 2;
+    const x1 = box.width / 2 - 200;
+
+    await page.getByTestId('tool-scale').click();
+    await clickCanvas(page, box, x1, cy);
+    await clickCanvas(page, box, x1 + 400, cy);
+    await page.getByTestId('scale-input').fill('10');
+    await page.getByTestId('scale-apply').click();
+    await expect(page.getByTestId('scale-input')).toBeHidden();
+
+    const newTakeoff = async (name: string, type: 'length' | 'area') => {
+      await page.getByRole('button', { name: 'New', exact: true }).click();
+      await page.getByTestId('takeoff-name-input').fill(name);
+      await page.locator('select').filter({ has: page.locator('option[value="count"]') }).first().selectOption(type);
+      await page.getByTestId('btn-create-takeoff').click();
+      await expect(page.getByTestId('takeoff-name-input')).toBeHidden();
+    };
+
+    // Base: 10 ft + a 5 ft segment. Shoe: one 5 ft line. Floor: an area.
+    await newTakeoff('Base', 'length');
+    await page.getByTestId('tool-length').click();
+    await clickCanvas(page, box, x1, cy - 120);
+    await clickCanvas(page, box, x1 + 400, cy - 120);
+    await page.keyboard.press('Enter');
+    await clickCanvas(page, box, x1, cy - 60);
+    await clickCanvas(page, box, x1 + 200, cy - 60);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+
+    await newTakeoff('Shoe', 'length');
+    await page.getByTestId('tool-length').click();
+    await clickCanvas(page, box, x1, cy + 20);
+    await clickCanvas(page, box, x1 + 200, cy + 20);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+
+    await newTakeoff('Floor', 'area');
+    await page.getByTestId('tool-area').click();
+    await clickCanvas(page, box, x1, cy + 100);
+    await clickCanvas(page, box, x1 + 200, cy + 100);
+    await clickCanvas(page, box, x1 + 200, cy + 200);
+    await clickCanvas(page, box, x1, cy + 200);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+    const rows = page.getByTestId('measurement-row');
+    await expect(rows).toHaveCount(3);
+
+    // Shift+click Base's short segment and Shoe's line.
+    await page.getByTestId('tool-pan').click();
+    await page.keyboard.down('Shift');
+    await clickCanvas(page, box, x1 + 100, cy - 60);
+    await clickCanvas(page, box, x1 + 100, cy + 20);
+    const set = page.getByTestId('selection-info-segment-set');
+    await expect(set).toContainText('2 segments selected');
+    await expect(set).toContainText(`10' - 0"`);
+    // An area can't join a length selection.
+    await clickCanvas(page, box, x1, cy + 150);
+    await page.keyboard.up('Shift');
+    await expect(page.getByText(/Can't mix length and area segments/)).toBeVisible();
+    await expect(set).toContainText('2 segments selected');
+
+    await page.keyboard.press('Control+c');
+    await expect(page.getByText('Copied 2 segments')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(set).toHaveCount(0);
+
+    // Paste both into a new takeoff: one 10 ft measurement.
+    await page.keyboard.press('Control+v');
+    await expect(page.getByTestId('paste-segments-modal')).toContainText('Paste 2 segments');
+    await page.getByTestId('paste-into-new').click();
+    await page.getByTestId('takeoff-name-input').fill('Trim');
+    await page.getByTestId('btn-create-takeoff').click();
+    await expect(page.getByTestId('takeoff-name-input')).toBeHidden();
+    await expect(rows).toHaveCount(4);
+    await expect(page.getByTestId('selection-info-bar')).toContainText('Trim');
+    await expect(page.getByTestId('selection-info-total')).toContainText(`10' - 0"`);
+
+    // Ctrl+click two whole measurements: Ctrl+C copies all their segments.
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tool-pan').click();
+    await page.keyboard.down('Control');
+    await clickCanvas(page, box, x1 + 300, cy - 120);
+    await clickCanvas(page, box, x1 + 100, cy + 20);
+    await page.keyboard.up('Control');
+    await expect(page.getByTestId('selection-info-bar')).toContainText('2 selected');
+    await page.keyboard.press('Control+c');
+    await expect(page.getByText('Copied 3 segments')).toBeVisible();
+  });
 });

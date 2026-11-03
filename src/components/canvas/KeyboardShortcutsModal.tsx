@@ -40,6 +40,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
                 ['Delete', 'Delete selected measurement'],
                 ['Backspace (while drawing)', 'Remove last point'],
                 ['P', 'Resume/extend selected measurement (or segment)'],
+                ['Ctrl+click', 'Select several measurements (same type)'],
+                ['Shift+click', 'Select several segments, from any measurements (same type)'],
                 ['Ctrl+C', 'Copy selected segment(s)'],
                 ['Ctrl+V', 'Paste segments into the current or a new takeoff'],
                 ['← / →', 'Previous / next page'],

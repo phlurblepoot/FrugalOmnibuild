@@ -20,6 +20,7 @@ import {
   convertUnit,
   expandArcPoints,
   formatCanvasMeasurement,
+  formatFeetAndInches,
   measurementAreaPx,
 } from './math';
 
@@ -308,4 +309,41 @@ export const summarizeSelection = (
     summary.countOnPage = page.measurements.filter(x => x.type === 'count' && x.takeoffId === m.takeoffId).length;
   }
   return summary;
+};
+
+// Several Shift-selected segments, possibly from different measurements
+// (and scales): how many, and their drawn total — lengths in feet and inches,
+// areas in square feet (cutouts deduct), count markers each. Unscaled
+// segments are left out of the total.
+export interface SegmentSetSummary {
+  count: number;
+  type: QuantityType;
+  total: string;
+}
+
+export const summarizeSegmentSet = (
+  page: Pick<ProjectPage, 'measurements' | 'scaleConfig' | 'isMultiRegion' | 'scaleRegions'>,
+  refs: { measurementId: string; segIdx: number }[],
+): SegmentSetSummary | null => {
+  let type: QuantityType | undefined;
+  let count = 0;
+  let total = 0;
+  for (const r of refs) {
+    const m = page.measurements.find(x => x.id === r.measurementId);
+    const seg = m ? measurementSegmentAt(m, r.segIdx) : null;
+    if (!m || !seg || m.type === 'scale') continue;
+    count++;
+    type = m.type;
+    if (m.type === 'count') { total += 1; continue; }
+    const scale = measurementScale(page, m);
+    if (!scale || scale.pixelDistance === 0) continue;
+    // The drawn shape itself (not surface area), so pass its own type.
+    const q = segmentPixelQuantity(m, seg, m.type, scale);
+    total += convertUnit(calculateRealValue(q.pixelValue, q.type, scale), scale.unit, 'ft', q.type);
+  }
+  if (!type || count === 0) return null;
+  const text = type === 'count' ? `${total} each`
+    : type === 'length' ? formatFeetAndInches(total, 32)
+    : `${total.toFixed(2)} sq ft`;
+  return { count, type, total: text };
 };

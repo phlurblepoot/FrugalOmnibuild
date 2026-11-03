@@ -18,7 +18,7 @@ import { useNotes } from '../context/NotesContext';
 import { CustomCostRow, costLineForEditing } from '../components/CustomCostRow';
 import { useMeasurementHistory } from '../hooks/useMeasurementHistory';
 import { computeRevisionModel, effectiveSheetId } from '../utils/planSets';
-import { summarizeSelection } from '../utils/segmentValue';
+import { summarizeSegmentSet, summarizeSelection } from '../utils/segmentValue';
 import { measurementMultiplier, multiplierPatch, multipliersMatch } from '../utils/multiplier';
 import { MultiplierModal } from '../components/canvas/MultiplierModal';
 import { PlanSetCompare } from '../components/PlanSetCompare';
@@ -26,7 +26,7 @@ import { computeTakeoffTotals } from './project/proposal/proposalGenerator';
 import { CLIENT_SESSION_ID } from '../utils/clientSession';
 import { NumberInput } from '../components/ui';
 import { QUICK_MEASURE_COLOR } from '../utils/quickMeasure';
-import { CopiedSegments, buildPastedMeasurement, canPasteInto, copySegments, isSurfacePaste, readSegmentClipboard, segmentCountLabel, writeSegmentClipboard } from '../utils/segmentClipboard';
+import { CopiedSegments, SegmentRef, allSegmentRefs, buildPastedMeasurement, canPasteInto, copySegmentRefs, copySegments, isSurfacePaste, readSegmentClipboard, segmentCountLabel, segmentRefKey, toggleSegmentRef, writeSegmentClipboard } from '../utils/segmentClipboard';
 import { PasteSegmentsModal } from '../components/canvas/PasteSegmentsModal';
 
 // Per device: whether quick measurements are shown on the plan.
@@ -234,14 +234,23 @@ const CanvasViewInner: React.FC = () => {
   const [newMeasurementType, setNewMeasurementType] = useState<'length' | 'area'>('area');
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  // Shift+click segment selection: segments from any measurements/takeoffs on
+  // this page, all one measurement type. Ctrl+click picks whole measurements.
+  const [segmentRefs, setSegmentRefs] = useState<SegmentRef[]>([]);
 
   // Clear multi-select when switching to a drawing tool
   useEffect(() => {
     if (currentTool === 'length' || currentTool === 'area' || currentTool === 'subtract' || currentTool === 'count' || currentTool === 'scale') {
       setMultiSelectedIds(new Set());
       setIsMultiSelectMode(false);
+      setSegmentRefs([]);
     }
   }, [currentTool]);
+  // A normal selection, or another page, ends a Shift segment selection.
+  useEffect(() => {
+    if (selectedMeasurementId) setSegmentRefs([]);
+  }, [selectedMeasurementId]);
+  useEffect(() => { setSegmentRefs([]); }, [page?.id]);
   const [aggregatedMeasurements, setAggregatedMeasurements] = useState<Measurement[]>([]);
 
   const [heightsModalMeasurementId, setHeightsModalMeasurementId] = useState<string | null>(null);
@@ -267,8 +276,25 @@ const CanvasViewInner: React.FC = () => {
   // From the right-click menu on a measurement other than the selected one,
   // that whole measurement's segments are copied. Works on read-only pages.
   const handleCopy = (measurementId?: string) => {
+    if (!page) return;
+    // Shift-selected segments, or Ctrl-selected measurements (all their
+    // segments), when the copy comes from the keyboard or from one of them.
+    let groupRefs: SegmentRef[] | null = null;
+    if (segmentRefs.length && (!measurementId || segmentRefs.some(r => r.measurementId === measurementId))) {
+      groupRefs = segmentRefs;
+    } else if (multiSelectedIds.size && (!measurementId || multiSelectedIds.has(measurementId))) {
+      groupRefs = page.measurements.filter(m => multiSelectedIds.has(m.id)).flatMap(allSegmentRefs);
+    }
+    if (groupRefs) {
+      const clip = copySegmentRefs(groupRefs, page.measurements, page.id);
+      if (!clip) return;
+      writeSegmentClipboard(clip);
+      setHasCopiedSegments(true);
+      toast(`Copied ${segmentCountLabel(clip)}`, { type: 'success', duration: 1500 });
+      return;
+    }
     const id = measurementId ?? selectedMeasurementId;
-    if (!id || !page) return;
+    if (!id) return;
     const measurement = page.measurements.find(m => m.id === id) ?? aggregatedMeasurements.find(m => m.id === id);
     if (!measurement) return;
     const segIdx = id === selectedMeasurementId ? selectedSegmentIdx : null;
@@ -292,6 +318,13 @@ const CanvasViewInner: React.FC = () => {
     }
     setPasteClip(clip);
   };
+
+  // The window key handler re-binds after each render; these refs let Ctrl+C /
+  // Ctrl+V always act on the selection the user can see right now.
+  const copyRef = useRef(handleCopy);
+  copyRef.current = handleCopy;
+  const pasteRef = useRef(handlePaste);
+  pasteRef.current = handlePaste;
 
   const pasteIntoTakeoff = (clip: CopiedSegments, takeoff: MeasurementTakeoff) => {
     if (readOnly || !page) return;
@@ -327,7 +360,33 @@ const CanvasViewInner: React.FC = () => {
     toast(`Pasted into "${takeoff.name}"`, { type: 'success', duration: 1500 });
   };
 
+  // Shift+click: add or remove one segment. A segment or measurement that was
+  // already selected the normal way joins the set first.
+  const handleSegmentToggle = (measurementId: string, segIdx: number) => {
+    if (!page) return;
+    const typeOf = (id: string) => page.measurements.find(m => m.id === id)?.type;
+    let base = segmentRefs;
+    if (base.length === 0 && selectedMeasurementId) {
+      const current = page.measurements.find(m => m.id === selectedMeasurementId);
+      if (current && current.type !== 'scale') {
+        base = selectedSegmentIdx === null || current.type === 'count'
+          ? allSegmentRefs(current).filter(r => current.type !== 'count' || r.segIdx === -1)
+          : [{ measurementId: current.id, segIdx: selectedSegmentIdx }];
+      }
+    }
+    const { refs, rejected } = toggleSegmentRef(base, { measurementId, segIdx }, typeOf);
+    if (rejected) {
+      toast(`Can't mix ${typeOf(base[0].measurementId)} and ${typeOf(measurementId)} segments in one selection`, { type: 'warning' });
+      return;
+    }
+    setSegmentRefs(refs);
+    setMultiSelectedIds(new Set());
+    setSelectedMeasurementId(null);
+    setSelectedSegmentIdx(null);
+  };
+
   const handleMultiSelectToggle = (id: string, type: string) => {
+    setSegmentRefs([]);
     setMultiSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -657,6 +716,7 @@ const CanvasViewInner: React.FC = () => {
       if (e.key === 'Escape') {
         if (showShortcutsHelp) { setShowShortcutsHelp(false); return; }
         if (pasteClip) { setPasteClip(null); return; }
+        if (segmentRefs.length) { setSegmentRefs([]); return; }
         if (showScaleModal) { setShowScaleModal(false); return; }
         if (newMeasurementModal) { setNewMeasurementModal(null); return; }
         if (showDeleteConfirm) { setShowDeleteConfirm(false); setMeasurementToDelete(null); return; }
@@ -715,12 +775,12 @@ const CanvasViewInner: React.FC = () => {
         }
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedMeasurementId) {
-        handleCopy();
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        copyRef.current();
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !readOnly && !pasteClip && !showTakeoffModal) {
-        handlePaste();
+        pasteRef.current();
       }
 
       // Redo must be checked before Undo (Shift+Z vs Z)
@@ -753,7 +813,7 @@ const CanvasViewInner: React.FC = () => {
   }, [selectedMeasurementId, selectedSegmentIdx, page, project, history, redoStack, aggregatedMeasurements,
       showShortcutsHelp, showScaleModal, showDeleteConfirm, showTakeoffModal,
       heightsModalMeasurementId, multiplierModalMeasurementId, editingTakeoff, toolDisabledMessage, takeoffToDelete,
-      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure, showCompare, pasteClip]);
+      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure, showCompare, pasteClip, segmentRefs, multiSelectedIds]);
 
   // When nothing is selected, drawing tools are disabled — reset to pan so the user isn't stuck.
   useEffect(() => {
@@ -1496,6 +1556,8 @@ const CanvasViewInner: React.FC = () => {
     ? page
     : project.pages.find(p => p.measurements.some(m => m.id === selectedMeasurementId));
   const selectionMeasurement = selectionPage?.measurements.find(m => m.id === selectedMeasurementId);
+  const segmentSetSummary = page && segmentRefs.length ? summarizeSegmentSet(page, segmentRefs) : null;
+  const segmentSelectionKeys = new Set(segmentRefs.map(segmentRefKey));
   const selectionSummary = selectionPage && selectionMeasurement
     ? summarizeSelection(selectionPage, selectionMeasurement, selectedSegmentIdx, project.takeoffs, costTotals)
     : null;
@@ -2368,6 +2430,8 @@ const CanvasViewInner: React.FC = () => {
               else { setSelectedMeasurementId(id); setSelectedSegmentIdx(null); }
             }}
             onSelectSegment={selectMeasurementSegment}
+            onSegmentToggle={handleSegmentToggle}
+            segmentSelection={segmentSelectionKeys}
             quickMeasure={quickMeasure}
             resumeMeasurement={resumeMeasurement}
             resumeSegmentIdx={resumeSegmentIdx}
@@ -2458,7 +2522,7 @@ const CanvasViewInner: React.FC = () => {
             hasCopied={hasCopiedSegments}
             multiSelectedIds={multiSelectedIds}
             onMultiSelectToggle={handleMultiSelectToggle}
-            onClearMultiSelect={() => setMultiSelectedIds(new Set())}
+            onClearMultiSelect={() => { setMultiSelectedIds(new Set()); setSegmentRefs([]); }}
             isMultiSelectMode={isMultiSelectMode}
           />
 
@@ -2474,7 +2538,7 @@ const CanvasViewInner: React.FC = () => {
           )}
 
           {/* Selection Info Bar: the selected measurement's (or segment's) quantity and $ */}
-          <SelectionInfoBar summary={selectionSummary} multiCount={multiSelectedIds.size} />
+          <SelectionInfoBar summary={selectionSummary} multiCount={multiSelectedIds.size} segmentSet={segmentSetSummary} />
         </div>
       </div>
 

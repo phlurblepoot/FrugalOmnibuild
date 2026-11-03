@@ -119,3 +119,61 @@ export const segmentCountLabel = (clip: Pick<CopiedSegments, 'type' | 'segments'
   if (clip.type === 'count') return 'marker';
   return clip.segments.length === 1 ? '1 segment' : `${clip.segments.length} segments`;
 };
+
+// ── Several segments at once (Shift+click) or several measurements (Ctrl+click)
+
+/** One Shift-selected segment: -1 = the primary shape, 0+ = m.segments[i]. */
+export interface SegmentRef { measurementId: string; segIdx: number }
+
+export const segmentRefKey = (r: SegmentRef): string => `${r.measurementId}:${r.segIdx}`;
+
+/** Shift+click toggles a segment in the selection. Segments of a different
+ *  measurement type (length / area / count) can't join, so the selection
+ *  is left as it was. */
+export const toggleSegmentRef = (
+  refs: SegmentRef[],
+  ref: SegmentRef,
+  typeOf: (measurementId: string) => MeasurementType | undefined,
+): { refs: SegmentRef[]; rejected: boolean } => {
+  const key = segmentRefKey(ref);
+  if (refs.some(r => segmentRefKey(r) === key)) {
+    return { refs: refs.filter(r => segmentRefKey(r) !== key), rejected: false };
+  }
+  const existingType = refs.length ? typeOf(refs[0].measurementId) : undefined;
+  if (existingType && existingType !== typeOf(ref.measurementId)) return { refs, rejected: true };
+  return { refs: [...refs, ref], rejected: false };
+};
+
+/** Every segment of a measurement, as refs (primary first). */
+export const allSegmentRefs = (m: Pick<Measurement, 'id' | 'segments'>): SegmentRef[] =>
+  [{ measurementId: m.id, segIdx: -1 }, ...(m.segments ?? []).map((_, i) => ({ measurementId: m.id, segIdx: i }))];
+
+/** The clipboard for several selected segments, possibly from different
+ *  measurements and takeoffs. Wall heights only come along when every
+ *  segment is from one measurement (they belong to that measurement). */
+export const copySegmentRefs = (
+  refs: SegmentRef[],
+  measurements: Measurement[],
+  pageId: string,
+): CopiedSegments | null => {
+  const byId = new Map(measurements.map(m => [m.id, m]));
+  const parts: CopiedSegments[] = [];
+  for (const r of refs) {
+    const m = byId.get(r.measurementId);
+    if (!m) continue;
+    const part = copySegments(m, r.segIdx, pageId);
+    if (part) parts.push(part);
+  }
+  if (parts.length === 0) return null;
+  const type = parts[0].type;
+  if (parts.some(p => p.type !== type)) return null;
+  const sources = new Set(refs.filter(r => byId.has(r.measurementId)).map(r => r.measurementId));
+  const single = sources.size === 1 ? parts[0] : undefined;
+  return {
+    type,
+    segments: parts.flatMap(p => p.segments),
+    ...(single?.heights ? { heights: single.heights } : {}),
+    ...(single?.isTwoSided ? { isTwoSided: true } : {}),
+    sourcePageId: pageId,
+  };
+};

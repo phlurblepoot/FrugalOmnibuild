@@ -1,5 +1,5 @@
 import React from 'react';
-import { QuantityValue, SelectionSummary } from '../../utils/segmentValue';
+import { QuantityValue, SegmentSetSummary, SelectionSummary } from '../../utils/segmentValue';
 
 // One labelled value: "SEGMENT / 420.00 sq ft · $1,470". The selected
 // segment's value wears the canvas selection amber, like its label there. A
@@ -29,9 +29,11 @@ function Stat({ label, value, highlight, testId }: {
 // zoom. It stacks just above PdfCanvas's zoom toolbar (bottom-20 on phones,
 // bottom-6 from md) and only takes pointer events on its own footprint.
 // Several multi-selected measurements show a count, as the sidebar does.
-export function SelectionInfoBar({ summary, multiCount }: {
+export function SelectionInfoBar({ summary, multiCount, segmentSet }: {
   summary: SelectionSummary | null;
   multiCount: number;
+  /** Shift+click segments: how many, and their combined drawn total. */
+  segmentSet?: SegmentSetSummary | null;
 }) {
   const placement = 'absolute left-1/2 -translate-x-1/2 bottom-[8.5rem] md:bottom-20 z-30 w-max max-w-[calc(100%-2rem)]';
 
@@ -42,6 +44,22 @@ export function SelectionInfoBar({ summary, multiCount }: {
         className={`${placement} rounded-full border border-amber-200 dark:border-amber-700/30 bg-amber-50 dark:bg-amber-900/40 px-4 py-2 text-sm font-semibold text-amber-800 dark:text-amber-300 shadow-lg`}
       >
         {multiCount} selected
+      </div>
+    );
+  }
+  if (segmentSet) {
+    const noun = segmentSet.type === 'count'
+      ? (segmentSet.count === 1 ? 'marker' : 'markers')
+      : (segmentSet.count === 1 ? 'segment' : 'segments');
+    return (
+      <div
+        data-testid="selection-info-bar"
+        className={`${placement} glass-panel border border-edge rounded-xl shadow-lg px-3 py-2 flex flex-wrap items-center gap-x-5 gap-y-1.5`}
+      >
+        <div data-testid="selection-info-segment-set" className="flex flex-col items-start leading-tight">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">{segmentSet.count} {noun} selected</span>
+          <span className="text-sm font-semibold px-1.5 rounded-md bg-amber-400 text-amber-950 whitespace-nowrap">{segmentSet.total}</span>
+        </div>
       </div>
     );
   }
