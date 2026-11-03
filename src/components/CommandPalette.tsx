@@ -331,8 +331,8 @@ export const CommandPalette: React.FC = () => {
     { keys: ['Backspace'], label: 'Remove last point (while drawing)' },
     { keys: ['P'], label: 'Resume/extend selected measurement' },
     { keys: ['A'], label: 'Toggle arc mode (while drawing)' },
-    { keys: ['⌘/Ctrl', 'C'], label: 'Copy measurement' },
-    { keys: ['⌘/Ctrl', 'V'], label: 'Paste measurement' },
+    { keys: ['⌘/Ctrl', 'C'], label: 'Copy selected segment(s)' },
+    { keys: ['⌘/Ctrl', 'V'], label: 'Paste segments' },
     { keys: ['←', '→'], label: 'Previous / next page' },
     { keys: ['↵'], label: 'Finish current measurement' },
   ];

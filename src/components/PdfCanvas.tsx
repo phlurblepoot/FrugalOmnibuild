@@ -250,7 +250,8 @@ interface PdfCanvasProps {
   onPageReferenceClick?: (pageId: string) => void;
   onUndo?: () => void;
   onRedo?: () => void;
-  onCopy?: () => void;
+  /** Copies the given measurement's selected segment(s) (or all of it, when it isn't the selected one). */
+  onCopy?: (measurementId?: string) => void;
   onPaste?: () => void;
   hasCopied?: boolean;
   multiSelectedIds?: Set<string>;
@@ -1821,8 +1822,8 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
           onContextMenu={(e) => {
             e.evt.preventDefault();
             e.cancelBubble = true;
-            // Read-only history: no edit/delete menu on measurements.
-            if (readOnly) return;
+            // Read-only history: the menu offers Copy only (no edit/delete).
+            if (readOnly && !onCopy) return;
             setContextMenu({ x: e.evt.clientX, y: e.evt.clientY, measurementId: m.id });
           }}
           onTouchStart={(e) => {
@@ -2486,16 +2487,19 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
         >
           {contextMenu.measurementId && (
             <>
-              <button
-                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
-                onClick={() => { onDeleteMeasurement(contextMenu.measurementId!); setContextMenu(null); }}
-              >
-                <Trash2 size={14} /> Delete
-              </button>
+              {!readOnly && (
+                <button
+                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+                  onClick={() => { onDeleteMeasurement(contextMenu.measurementId!); setContextMenu(null); }}
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+              )}
               {onCopy && (
                 <button
+                  data-testid="context-menu-copy"
                   className="w-full text-left px-4 py-2 text-sm text-ink hover:bg-hover flex items-center gap-2"
-                  onClick={() => { onCopy(); setContextMenu(null); }}
+                  onClick={() => { onCopy(contextMenu.measurementId!); setContextMenu(null); }}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                   Copy
@@ -2524,6 +2528,7 @@ export const PdfCanvas: React.FC<PdfCanvasProps> = ({
           )}
           {onPaste && (
             <button
+              data-testid="context-menu-paste"
               className="w-full text-left px-4 py-2 text-sm text-ink hover:bg-hover flex items-center gap-2 disabled:opacity-40"
               onClick={() => { onPaste(); setContextMenu(null); }}
               disabled={!hasCopied}

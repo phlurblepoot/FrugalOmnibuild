@@ -26,6 +26,8 @@ import { computeTakeoffTotals } from './project/proposal/proposalGenerator';
 import { CLIENT_SESSION_ID } from '../utils/clientSession';
 import { NumberInput } from '../components/ui';
 import { QUICK_MEASURE_COLOR } from '../utils/quickMeasure';
+import { CopiedSegments, buildPastedMeasurement, canPasteInto, copySegments, isSurfacePaste, readSegmentClipboard, segmentCountLabel, writeSegmentClipboard } from '../utils/segmentClipboard';
+import { PasteSegmentsModal } from '../components/canvas/PasteSegmentsModal';
 
 // Per device: whether quick measurements are shown on the plan.
 const QUICK_VISIBLE_KEY = 'canvas-show-quick-measurements';
@@ -201,6 +203,11 @@ const CanvasViewInner: React.FC = () => {
   const [measurementToDelete, setMeasurementToDelete] = useState<{id: string, targetPageId?: string} | null>(null);
 
   const [showTakeoffModal, setShowTakeoffModal] = useState(false);
+  // Paste: the copied segments waiting for the user to pick a takeoff, and
+  // the copy to drop into the takeoff the New Takeoff modal is about to make.
+  const [pasteClip, setPasteClip] = useState<CopiedSegments | null>(null);
+  const [pendingNewTakeoffPaste, setPendingNewTakeoffPaste] = useState<CopiedSegments | null>(null);
+  const [hasCopiedSegments, setHasCopiedSegments] = useState(() => !!readSegmentClipboard());
   const [templates, setTemplates] = useState<TakeoffTemplate[]>([]);
 
   const [editingTakeoff, setEditingTakeoff] = useState<MeasurementTakeoff | null>(null);
@@ -256,53 +263,68 @@ const CanvasViewInner: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleCopy = () => {
-    if (!selectedMeasurementId) return;
-    const measurement = aggregatedMeasurements.find(m => m.id === selectedMeasurementId);
-    if (measurement) {
-      localStorage.setItem('copiedMeasurement', JSON.stringify(measurement));
-      toast(`Copied "${measurement.name}"`, { type: 'success', duration: 1500 });
-    }
+  // Copy takes the selected segment(s) — the geometry, not the measurement.
+  // From the right-click menu on a measurement other than the selected one,
+  // that whole measurement's segments are copied. Works on read-only pages.
+  const handleCopy = (measurementId?: string) => {
+    const id = measurementId ?? selectedMeasurementId;
+    if (!id || !page) return;
+    const measurement = page.measurements.find(m => m.id === id) ?? aggregatedMeasurements.find(m => m.id === id);
+    if (!measurement) return;
+    const segIdx = id === selectedMeasurementId ? selectedSegmentIdx : null;
+    const clip = copySegments(measurement, segIdx, page.id);
+    if (!clip) return;
+    writeSegmentClipboard(clip);
+    setHasCopiedSegments(true);
+    toast(`Copied ${segmentCountLabel(clip)}`, { type: 'success', duration: 1500 });
   };
 
+  // Paste asks where the copy goes: the active takeoff, or a new takeoff.
   const handlePaste = () => {
     // Frozen history / phone read-only: pasting would create a new measurement.
-    if (readOnly) return;
-    const copiedStr = localStorage.getItem('copiedMeasurement');
-    if (!copiedStr || !page) return;
-    try {
-      const copiedMeasurement = JSON.parse(copiedStr) as Measurement;
-      const isMultiRegionValid = page.isMultiRegion && page.scaleRegions && page.scaleRegions.length > 0;
-      if (!page.scaleConfig && !isMultiRegionValid) {
-        setToolDisabledMessage('Please set the scale before pasting.');
-        return;
-      }
-      const offset = 20;
-      const newPoints = copiedMeasurement.points.map(p => ({ x: p.x + offset, y: p.y + offset }));
-      let regionId: string | undefined = undefined;
-      if (page.isMultiRegion && page.scaleRegions) {
-        const region = page.scaleRegions.find(r => isPointInPolygon(newPoints[0], r.points));
-        if (region) regionId = region.id;
-      }
-      const newMeasurement: Measurement = {
-        ...copiedMeasurement,
-        id: uuidv4(),
-        name: `${copiedMeasurement.name} (Copy)`,
-        points: newPoints,
-        planSetId: page.planSetId,
-        regionId,
-      };
-      pushToHistory({ type: 'add', measurement: newMeasurement });
-      // Measurement-only mutation — no other page/takeoff state changes, so
-      // the project PUT is dropped in favor of the op (contract item 1).
-      applyLocalMeasurements(page.id, [...page.measurements, newMeasurement]);
-      void sendMeasurementOp({ projectId: projectId!, pageId: page.id, action: 'add', measurement: newMeasurement as unknown as Record<string, unknown> & { id: string } })
-        .then(handleMeasurementOpResult);
-      setSelectedMeasurementId(newMeasurement.id);
-      toast('Measurement pasted', { type: 'success', duration: 1500 });
-    } catch (err) {
-      console.error('Failed to parse copied measurement', err);
+    if (readOnly || !page) return;
+    const clip = readSegmentClipboard();
+    if (!clip) return;
+    const isMultiRegionValid = page.isMultiRegion && page.scaleRegions && page.scaleRegions.length > 0;
+    if (!page.scaleConfig && !isMultiRegionValid) {
+      setToolDisabledMessage('Please set the scale before pasting.');
+      return;
     }
+    setPasteClip(clip);
+  };
+
+  const pasteIntoTakeoff = (clip: CopiedSegments, takeoff: MeasurementTakeoff) => {
+    if (readOnly || !page) return;
+    if (!canPasteInto(clip, takeoff)) {
+      toast(`"${takeoff.name}" is a ${takeoff.type} takeoff and can't hold ${clip.type} segments`, { type: 'warning' });
+      return;
+    }
+    const typeWord = clip.type === 'length' ? 'Length' : clip.type === 'area' ? 'Area' : 'Count';
+    const newMeasurement = buildPastedMeasurement(clip, {
+      id: uuidv4(),
+      name: `${typeWord} ${page.measurements.length + 1}`,
+      takeoff,
+      pageId: page.id,
+      planSetId: page.planSetId,
+      regionAt: (pt) => page.isMultiRegion && page.scaleRegions
+        ? page.scaleRegions.find(r => isPointInPolygon(pt, r.points))?.id
+        : undefined,
+    });
+    pushToHistory({ type: 'add', measurement: newMeasurement });
+    // Measurement-only mutation — no other page/takeoff state changes, so
+    // the project PUT is dropped in favor of the op (contract item 1).
+    applyLocalMeasurements(page.id, [...page.measurements, newMeasurement]);
+    void sendMeasurementOp({ projectId: projectId!, pageId: page.id, action: 'add', measurement: newMeasurement as unknown as Record<string, unknown> & { id: string } })
+      .then(handleMeasurementOpResult);
+    setSelectedMeasurementId(newMeasurement.id);
+    setSelectedSegmentIdx(null);
+    setSelectedTakeoffId(takeoff.id);
+    setSelectedColor(takeoff.color);
+    setQuickMeasure(false);
+    if (isSurfacePaste(clip, takeoff) && !newMeasurement.heights?.length) {
+      setHeightsModalMeasurementId(newMeasurement.id);
+    }
+    toast(`Pasted into "${takeoff.name}"`, { type: 'success', duration: 1500 });
   };
 
   const handleMultiSelectToggle = (id: string, type: string) => {
@@ -634,6 +656,7 @@ const CanvasViewInner: React.FC = () => {
       // Escape: close modals / deselect (priority order)
       if (e.key === 'Escape') {
         if (showShortcutsHelp) { setShowShortcutsHelp(false); return; }
+        if (pasteClip) { setPasteClip(null); return; }
         if (showScaleModal) { setShowScaleModal(false); return; }
         if (newMeasurementModal) { setNewMeasurementModal(null); return; }
         if (showDeleteConfirm) { setShowDeleteConfirm(false); setMeasurementToDelete(null); return; }
@@ -696,7 +719,7 @@ const CanvasViewInner: React.FC = () => {
         handleCopy();
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !readOnly) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !readOnly && !pasteClip && !showTakeoffModal) {
         handlePaste();
       }
 
@@ -730,7 +753,7 @@ const CanvasViewInner: React.FC = () => {
   }, [selectedMeasurementId, selectedSegmentIdx, page, project, history, redoStack, aggregatedMeasurements,
       showShortcutsHelp, showScaleModal, showDeleteConfirm, showTakeoffModal,
       heightsModalMeasurementId, multiplierModalMeasurementId, editingTakeoff, toolDisabledMessage, takeoffToDelete,
-      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure, showCompare]);
+      showPageJump, prevPageId, nextPageId, pageIds, newMeasurementModal, readOnly, quickMeasure, showCompare, pasteClip]);
 
   // When nothing is selected, drawing tools are disabled — reset to pan so the user isn't stuck.
   useEffect(() => {
@@ -2430,9 +2453,9 @@ const CanvasViewInner: React.FC = () => {
             currentUserId={socket?.id}
             onUndo={undo}
             onRedo={redo}
-            onCopy={selectedMeasurementId ? handleCopy : undefined}
-            onPaste={handlePaste}
-            hasCopied={!!localStorage.getItem('copiedMeasurement')}
+            onCopy={handleCopy}
+            onPaste={readOnly ? undefined : handlePaste}
+            hasCopied={hasCopiedSegments}
             multiSelectedIds={multiSelectedIds}
             onMultiSelectToggle={handleMultiSelectToggle}
             onClearMultiSelect={() => setMultiSelectedIds(new Set())}
@@ -2612,9 +2635,20 @@ const CanvasViewInner: React.FC = () => {
         </div>
       )}
       {/* Takeoff Modal */}
+      {pasteClip && (
+        <PasteSegmentsModal
+          clip={pasteClip}
+          activeTakeoff={quickMeasure ? undefined : project.takeoffs.find(t => t.id === selectedTakeoffId)}
+          onPasteIntoActive={(takeoff) => { const clip = pasteClip; setPasteClip(null); pasteIntoTakeoff(clip, takeoff); }}
+          onPasteIntoNew={() => { setPendingNewTakeoffPaste(pasteClip); setPasteClip(null); setShowTakeoffModal(true); }}
+          onCancel={() => setPasteClip(null)}
+        />
+      )}
       <NewTakeoffModal
         open={showTakeoffModal}
-        onClose={() => setShowTakeoffModal(false)}
+        onClose={() => { setShowTakeoffModal(false); setPendingNewTakeoffPaste(null); }}
+        initialType={pendingNewTakeoffPaste?.type === 'scale' ? undefined : pendingNewTakeoffPaste?.type}
+        title={pendingNewTakeoffPaste ? 'New Takeoff for Pasted Segments' : undefined}
         project={project}
         templates={templates}
         onCreateTakeoff={async (newTakeoff) => {
@@ -2628,6 +2662,11 @@ const CanvasViewInner: React.FC = () => {
           setSelectedColor(newTakeoff.color);
           setCurrentTool(newTakeoff.type);
           setShowTakeoffModal(false);
+          if (pendingNewTakeoffPaste) {
+            const clip = pendingNewTakeoffPaste;
+            setPendingNewTakeoffPaste(null);
+            pasteIntoTakeoff(clip, newTakeoff);
+          }
         }}
       />
 

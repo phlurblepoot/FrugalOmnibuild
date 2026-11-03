@@ -11,6 +11,10 @@ interface NewTakeoffModalProps {
   project: Project;
   templates: TakeoffTemplate[];
   onCreateTakeoff: (takeoff: MeasurementTakeoff) => Promise<void>;
+  /** Preselects the measurement type when the modal opens (e.g. a paste). */
+  initialType?: 'length' | 'area' | 'count';
+  /** Replaces the heading. */
+  title?: string;
 }
 
 export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
@@ -19,6 +23,8 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
   project,
   templates,
   onCreateTakeoff,
+  initialType,
+  title,
 }) => {
   const [name, setName] = useState('');
   const [color, setColor] = useState('#3b82f6');
@@ -30,6 +36,10 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
   const [pricePackage, setPricePackage] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [showPkgSuggestions, setShowPkgSuggestions] = useState(false);
+
+  useEffect(() => {
+    if (open && initialType) setType(initialType);
+  }, [open, initialType]);
 
   useEffect(() => {
     if (!open) {
@@ -103,7 +113,7 @@ export const NewTakeoffModal: React.FC<NewTakeoffModalProps> = ({
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-raised rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
         <div className="p-6 border-b border-edge">
-          <h3 className="text-lg font-semibold text-ink">Create Measurement Takeoff</h3>
+          <h3 className="text-lg font-semibold text-ink">{title ?? 'Create Measurement Takeoff'}</h3>
         </div>
 
         <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">

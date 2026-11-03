@@ -32,6 +32,15 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '4.8.1.2',
+    date: 'November 3, 2026',
+    changes: [
+      'Change: copy and paste on the takeoff canvas now copies the segment you have selected, not the whole measurement. Select one segment and press Ctrl+C (or right-click and choose Copy); with the whole measurement selected, all its segments are copied. Copy also works on older, read-only revisions.',
+      'Pasting (Ctrl+V, or right-click and Paste) now asks where the segments go: Current takeoff adds them as a new measurement in the takeoff that\'s active in the sidebar, and New takeoff lets you create a takeoff and puts them in it as its first measurement. Undo removes a paste.',
+      'Fixed: pasting a measurement with several segments now moves every segment together, instead of leaving the extra segments on top of the original. Pasting onto a different page or sheet keeps the same position.',
+    ],
+  },
+  {
     version: '4.8.1.1',
     date: 'October 30, 2026',
     changes: [
